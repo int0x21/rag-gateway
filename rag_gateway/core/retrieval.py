@@ -17,6 +17,40 @@ def rrf_fuse(ranked_lists: List[List[str]], k: int = 60) -> Dict[str, float]:
     return scores
 
 
+class RetrievalService:
+    def __init__(self, config, bm25: TantivyBM25, qdrant: QdrantVectorStore, tei: TEIClient):
+        self.config = config
+        self.bm25 = bm25
+        self.qdrant = qdrant
+        self.tei = tei
+
+    async def retrieve(self, query: str, filters: Optional[Dict[str, str]] = None, evidence_top_k: Optional[int] = None) -> Dict[str, Any]:
+        bm25_top_n = self.config.bm25_top_n
+        vec_top_n = self.config.vec_top_n
+        rrf_k = self.config.rrf_k
+        rerank_top_k = self.config.rerank_top_k
+
+        if evidence_top_k is None:
+            evidence_top_k = self.config.evidence_top_k
+
+        deps = RetrievalDeps(bm25=self.bm25, vec=self.qdrant, tei=self.tei)
+
+        result = await retrieve_evidence(
+            deps=deps,
+            query=query,
+            qdrant_filters=filters,
+            bm25_top_n=bm25_top_n,
+            vec_top_n=vec_top_n,
+            rrf_k=rrf_k,
+            rerank_top_k=rerank_top_k,
+            evidence_top_k=int(evidence_top_k),
+        )
+
+        return {
+            "evidence": result.evidence,
+        }
+
+
 @dataclass
 class RetrievalDeps:
     bm25: TantivyBM25
