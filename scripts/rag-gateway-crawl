@@ -1,0 +1,26 @@
+#!/bin/bash
+# RAG Gateway CLI Tool
+# Uses default config paths for simplicity
+
+# Default config paths
+DEFAULT_API_CONFIG="/etc/rag-gateway/api.yaml"
+DEFAULT_INGEST_CONFIG="/etc/rag-gateway/ingest.yaml"
+DEFAULT_SOURCES="/etc/rag-gateway/sources.yaml"
+
+# Use virtual environment
+VENV_DIR="/opt/llm/rag-gateway/.venv"
+if [ -d "$VENV_DIR" ]; then
+    export PYTHONPATH="/opt/llm/rag-gateway"
+    exec "$VENV_DIR/bin/python3" -m rag_gateway.ingestion.cli \
+        --api-config "$DEFAULT_API_CONFIG" \
+        --ingest-config "$DEFAULT_INGEST_CONFIG" \
+        --sources "$DEFAULT_SOURCES" \
+        "$@"
+else
+    export PYTHONPATH="/opt/llm/rag-gateway"
+    exec python3 -m rag_gateway.ingestion.cli \
+        --api-config "$DEFAULT_API_CONFIG" \
+        --ingest-config "$DEFAULT_INGEST_CONFIG" \
+        --sources "$DEFAULT_SOURCES" \
+        "$@"
+fi

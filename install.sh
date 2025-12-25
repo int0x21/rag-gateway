@@ -394,30 +394,19 @@ main() {
 
 
 deploy_cli_tool() {
-  local repo_root="$1"
-  log "Installing CLI tool"
-  
-  local cli_script="${APP_DIR}/rag_gateway/ingestion/cli.py"
-  local bin_path="/usr/local/bin/rag-gateway-crawl"
-  
-   cat > "${bin_path}" <<'EOF'
-#!/bin/bash
-# RAG Gateway CLI Tool
-# Use the virtual environment if it exists
-VENV_DIR="/opt/llm/rag-gateway/.venv"
-if [ -d "$VENV_DIR" ]; then
-    # Use virtual environment with proper PYTHONPATH
-    export PYTHONPATH="/opt/llm/rag-gateway"
-    exec "$VENV_DIR/bin/python3" -m rag_gateway.ingestion.cli "$@"
-else
-    # Fallback to system python3
-    export PYTHONPATH="/opt/llm/rag-gateway"
-    exec python3 -m rag_gateway.ingestion.cli "$@"
-fi
-EOF
-  
-  chmod +x "${bin_path}"
-  log "Installed CLI tool: ${bin_path}"
+    local repo_root="$1"
+    log "Installing CLI tool"
+
+    local cli_script="${repo_root}/scripts/rag-gateway-crawl"
+    local bin_path="/usr/local/bin/rag-gateway-crawl"
+
+    if [ ! -f "$cli_script" ]; then
+        die "CLI script not found: $cli_script"
+    fi
+
+    cp "$cli_script" "$bin_path"
+    chmod +x "$bin_path"
+    log "Installed CLI tool: $bin_path"
 }
 
 main "$@"

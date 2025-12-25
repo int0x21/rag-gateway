@@ -87,12 +87,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__
     )
-    p.add_argument("--api-config", required=True,
-                  help="Path to api.yaml config")
-    p.add_argument("--ingest-config", required=True,
-                  help="Path to ingest.yaml config")
-    p.add_argument("--sources", required=True,
-                  help="Path to sources.yaml")
+    p.add_argument("--api-config", default="/etc/rag-gateway/api.yaml",
+                   help="Path to api.yaml config (default: /etc/rag-gateway/api.yaml)")
+    p.add_argument("--ingest-config", default="/etc/rag-gateway/ingest.yaml",
+                   help="Path to ingest.yaml config (default: /etc/rag-gateway/ingest.yaml)")
+    p.add_argument("--sources", default="/etc/rag-gateway/sources.yaml",
+                   help="Path to sources.yaml (default: /etc/rag-gateway/sources.yaml)")
     p.add_argument("--source", action="append", dest="sources_filter",
                   help="Specific source names to crawl (can be specified multiple times)")
     p.add_argument("--force", action="store_true",
@@ -112,6 +112,20 @@ def main():
 
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
+
+    # Validate config files exist
+    import os
+    import sys
+    for config_path, config_name in [
+        (args.api_config, "API config"),
+        (args.ingest_config, "Ingest config"),
+        (args.sources, "Sources config")
+    ]:
+        if not os.path.isfile(config_path):
+            print(f"ERROR: {config_name} file not found: {config_path}", file=sys.stderr)
+            print("ERROR: Please ensure RAG Gateway is properly installed with 'sudo ./install.sh'", file=sys.stderr)
+            print("ERROR: Or specify custom paths with --api-config, --ingest-config, --sources", file=sys.stderr)
+            sys.exit(1)
 
     api_cfg = load_config(args.api_config)
     log_dir = getattr(api_cfg.paths, 'log_dir', '/opt/llm/rag/log')
