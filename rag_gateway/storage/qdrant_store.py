@@ -75,7 +75,7 @@ class QdrantVectorStore:
             collection_name=self.collection,
             query=vector,
             limit=top_n,
-            filter=qfilter,
+            query_filter=qfilter,
             with_payload=True,
         )
         hits: List[QdrantHit] = []
