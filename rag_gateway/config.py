@@ -59,42 +59,9 @@ class PromptingConfig:
 
 
 @dataclass(frozen=True)
-class IngestHTTPConfig:
-    user_agent: str
-    max_pages: int
-    max_depth: int
-    request_timeout_s: int
-    politeness_delay_s: float
-
-
-@dataclass(frozen=True)
-class IngestGitHubConfig:
-    max_files: int
-    max_file_size_bytes: int
-
-
-@dataclass(frozen=True)
-class IngestConfig:
-    qdrant_collection: str
-    batch_size: int
-    incremental: bool
-    skip_unchanged: bool
-    http: IngestHTTPConfig
-    github: IngestGitHubConfig
-
-
-@dataclass(frozen=True)
 class ChunkingConfig:
     max_chars: int
     overlap_chars: int
-
-
-@dataclass(frozen=True)
-class SchedulerConfig:
-    interval_minutes: int  # 0 disables
-    state_dir: str
-    lock_file: str
-    sources_file: str
 
 
 @dataclass(frozen=True)
@@ -106,9 +73,7 @@ class AppConfig:
     retrieval: RetrievalConfig
     safety: SafetyConfig
     prompting: PromptingConfig
-    ingest: IngestConfig
     chunking: ChunkingConfig
-    scheduler: SchedulerConfig
 
 
 def load_config(path: Optional[str] = None) -> AppConfig:
@@ -120,7 +85,7 @@ def load_config(path: Optional[str] = None) -> AppConfig:
 
     raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
 
-    required_sections = ["server", "paths", "upstreams", "models", "retrieval", "safety", "prompting", "ingest", "chunking", "scheduler"]
+    required_sections = ["server", "paths", "upstreams", "models", "retrieval", "safety", "prompting", "chunking"]
     for section in required_sections:
         if section not in raw:
             raise ValueError(f"Config missing required section: {section}")
@@ -132,20 +97,7 @@ def load_config(path: Optional[str] = None) -> AppConfig:
     retrieval = RetrievalConfig(**raw["retrieval"])
     safety = SafetyConfig(**raw["safety"])
     prompting = PromptingConfig(**raw["prompting"])
-
-    ingest_http = IngestHTTPConfig(**raw["ingest"]["http"])
-    ingest_gh = IngestGitHubConfig(**raw["ingest"]["github"])
-    ingest = IngestConfig(
-        qdrant_collection=raw["ingest"]["qdrant_collection"],
-        batch_size=int(raw["ingest"]["batch_size"]),
-        incremental=bool(raw["ingest"]["incremental"]),
-        skip_unchanged=bool(raw["ingest"]["skip_unchanged"]),
-        http=ingest_http,
-        github=ingest_gh,
-    )
-
     chunking = ChunkingConfig(**raw["chunking"])
-    scheduler = SchedulerConfig(**raw["scheduler"])
 
     return AppConfig(
         server=server,
@@ -155,7 +107,5 @@ def load_config(path: Optional[str] = None) -> AppConfig:
         retrieval=retrieval,
         safety=safety,
         prompting=prompting,
-        ingest=ingest,
         chunking=chunking,
-        scheduler=scheduler,
     )
