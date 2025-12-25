@@ -1,0 +1,73 @@
+server:
+  host: "127.0.0.1"
+  port: 9000
+  log_level: "INFO"
+
+paths:
+  tantivy_index_dir: "/opt/llm/rag/tantivy"
+
+upstreams:
+  qdrant_url: "http://127.0.0.1:6333"
+  tei_embed_url: "http://127.0.0.1:8081"
+  tei_rerank_url: "http://127.0.0.1:8082"
+  vllm_url: "http://127.0.0.1:8000"
+
+models:
+  generator_model: "generator"
+  embed_model: "Qwen/Qwen3-Embedding-8B"
+  rerank_model: "BAAI/bge-reranker-large"
+
+retrieval:
+  bm25_top_n: 150
+  vec_top_n: 150
+  rerank_top_k: 60
+  evidence_top_k: 14
+  rrf_k: 60
+  mode_overrides:
+    selection:
+      evidence_top_k: 10
+    diff:
+      evidence_top_k: 16
+
+safety:
+  redact: true
+  redaction_patterns:
+    - "(?i)(password\\s*[=:]\\s*)(\\S+)"
+    - "(?i)(secret\\s*[=:]\\s*)(\\S+)"
+    - "(?i)(token\\s*[=:]\\s*)(\\S+)"
+    - "(?i)(community\\s*[=:]\\s*)(\\S+)"
+    - "(?i)(snmp-server\\s+community\\s+)(\\S+)"
+
+prompting:
+  system_preamble: |
+    You are an operations assistant for network and infrastructure configuration.
+    Be conservative. If evidence is insufficient or version-dependent, say so explicitly.
+    Always include verification commands and a rollback approach when recommending changes.
+    Every non-trivial factual claim MUST be backed by citations in the form [chunk_id].
+  citation_rule: "Cite only from the provided EVIDENCE chunks using [chunk_id]."
+
+ingest:
+  qdrant_collection: "chunks_v1"
+  batch_size: 64
+  incremental: true
+  skip_unchanged: true
+  http:
+    user_agent: "rag-gateway/0.1 (internal)"
+    max_pages: 2000
+    max_depth: 4
+    request_timeout_s: 30
+    politeness_delay_s: 0.2
+  github:
+    max_files: 5000
+    max_file_size_bytes: 2000000
+
+chunking:
+  max_chars: 8000
+  overlap_chars: 800
+
+scheduler:
+  interval_minutes: 0 # 1440   # 0 disables
+  state_dir: "/opt/llm/rag/scheduler"
+  lock_file: "/opt/llm/rag/scheduler/crawl.lock"
+  sources_file: "/etc/rag-gateway/sources.yaml"
+

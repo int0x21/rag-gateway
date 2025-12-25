@@ -1,0 +1,17 @@
+[Unit]
+Description=Qdrant Vector Database
+After=network.target
+
+[Service]
+Type=simple
+User=qdrant
+Group=qdrant
+WorkingDirectory=/opt/llm/qdrant
+ExecStart=/usr/local/bin/qdrant --config-path /opt/llm/qdrant/config/production.yaml
+Restart=always
+RestartSec=2
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+

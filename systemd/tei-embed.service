@@ -1,0 +1,19 @@
+[Unit]
+Description=TEI Embeddings (GPU1)
+After=network.target
+
+[Service]
+Type=simple
+User=tei
+Group=tei
+Environment=CUDA_VISIBLE_DEVICES=0
+Environment=HF_HOME=/opt/llm/tei/cache
+WorkingDirectory=/opt/llm/tei
+ExecStart=/usr/local/bin/text-embeddings-router --model-id /opt/llm/tei/models/Qwen3-Embedding-8B --dtype float16 --hostname 127.0.0.1 --port 8081 --max-batch-tokens 16384 --auto-truncate --prometheus-port 9000
+Restart=always
+RestartSec=2
+LimitNOFILE=1048576
+
+[Install]
+WantedBy=multi-user.target
+

@@ -1,0 +1,142 @@
+defaults:
+  enabled: true
+  dry_run: false
+  preview_items: 10
+
+sources:
+  - name: "sonic-core"
+    tags: { vendor: "SONiC", product: "SONiC", source_type: "official_docs" }
+    http:
+      - start_urls: ["https://sonicfoundation.dev/"]
+        allowed_domains: ["sonicfoundation.dev"]
+        allowed_url_prefixes: ["https://sonicfoundation.dev/"]
+        exclude_url_patterns: ["\\?"]
+        max_pages: 300
+        max_depth: 2
+      - start_urls: ["https://github.com/sonic-net/SONiC/wiki/SONiC-Documentation"]
+        allowed_domains: ["github.com"]
+        allowed_url_prefixes: ["https://github.com/sonic-net/SONiC/wiki"]
+        exclude_url_patterns: ["\\?"]
+        max_pages: 600
+        max_depth: 3
+    github:
+      - repo: "https://github.com/sonic-net/SONiC"
+        ref: "master"
+        include_paths: ["doc", "README.md"]
+      - repo: "https://github.com/sonic-net/sonic-buildimage"
+        ref: "master"
+        include_paths: ["doc", "docs", "README.md"]
+      - repo: "https://github.com/sonic-net/sonic-utilities"
+        ref: "master"
+        include_paths: ["doc", "docs", "README.md"]
+
+  - name: "ceph-docs"
+    tags: { vendor: "Ceph", product: "Ceph", source_type: "official_docs" }
+    http:
+      - start_urls: ["https://docs.ceph.com/en/latest/"]
+        allowed_domains: ["docs.ceph.com"]
+        allowed_url_prefixes: ["https://docs.ceph.com/en/latest/"]
+        exclude_url_patterns: ["\\.pdf$", "\\.zip$", "\\?"]
+        max_pages: 1500
+        max_depth: 4
+    github:
+      - repo: "https://github.com/ceph/ceph"
+        ref: "main"
+        include_paths: ["doc", "README.md"]
+
+  - name: "drbd-linbit"
+    tags: { vendor: "LINBIT", product: "DRBD", source_type: "official_docs" }
+    http:
+      - start_urls: ["https://linbit.com/drbd-user-guide/drbd-guide-9_0-en/"]
+        allowed_domains: ["linbit.com"]
+        allowed_url_prefixes: ["https://linbit.com/drbd-user-guide/"]
+        exclude_url_patterns: ["\\.pdf$", "\\.zip$", "\\?"]
+        max_pages: 800
+        max_depth: 3
+    github:
+      - repo: "https://github.com/LINBIT/drbd-utils"
+        ref: "master"
+        include_paths: ["doc", "docs", "README"]
+      - repo: "https://github.com/LINBIT/drbd"
+        ref: "master"
+        include_paths: ["Documentation", "README"]
+
+  - name: "clusterlabs-ha-stack"
+    tags: { vendor: "ClusterLabs", product: "Pacemaker", source_type: "official_docs" }
+    http:
+      - start_urls: ["https://clusterlabs.org/projects/pacemaker/doc/index.php"]
+        allowed_domains: ["clusterlabs.org"]
+        allowed_url_prefixes: ["https://clusterlabs.org/projects/pacemaker/"]
+        exclude_url_patterns: ["\\.pdf$", "\\?"]
+        max_pages: 800
+        max_depth: 4
+      - start_urls: ["https://corosync.github.io/corosync/"]
+        allowed_domains: ["corosync.github.io"]
+        allowed_url_prefixes: ["https://corosync.github.io/corosync/"]
+        exclude_url_patterns: ["\\.pdf$", "\\?"]
+        max_pages: 400
+        max_depth: 3
+    github:
+      - repo: "https://github.com/ClusterLabs/pacemaker"
+        ref: "master"
+        include_paths: ["doc", "README", "INSTALL"]
+      - repo: "https://github.com/ClusterLabs/pcs"
+        ref: "main"
+        include_paths: ["README", "doc", "docs"]
+      - repo: "https://github.com/corosync/corosync"
+        ref: "main"
+        include_paths: ["man", "doc", "docs", "README"]
+
+  - name: "arista-eos-and-avd"
+    tags: { vendor: "Arista", product: "EOS", source_type: "official_docs" }
+    http:
+      - start_urls: ["https://www.arista.com/en/um-eos"]
+        allowed_domains: ["www.arista.com"]
+        allowed_url_prefixes: ["https://www.arista.com/en/um-eos/"]
+        exclude_url_patterns: ["\\.pdf$", "\\?"]
+        max_pages: 600
+        max_depth: 2
+      - start_urls: ["https://avd.arista.com/"]
+        allowed_domains: ["avd.arista.com"]
+        allowed_url_prefixes: ["https://avd.arista.com/"]
+        exclude_url_patterns: ["\\.pdf$", "\\?"]
+        max_pages: 600
+        max_depth: 2
+      - start_urls: ["https://aristanetworks.github.io/EosSdk/"]
+        allowed_domains: ["aristanetworks.github.io"]
+        allowed_url_prefixes: ["https://aristanetworks.github.io/EosSdk/"]
+        exclude_url_patterns: ["\\.pdf$", "\\?"]
+        max_pages: 300
+        max_depth: 2
+    github:
+      - repo: "https://github.com/aristanetworks/avd"
+        ref: "devel"
+        include_paths: ["README", "docs", "documentation"]
+
+  - name: "cisco-ios-xe-17"
+    tags: { vendor: "Cisco", product: "IOS-XE", version: "17", source_type: "official_docs" }
+    http:
+      - start_urls:
+          - "https://www.cisco.com/c/en/us/support/ios-nx-os-software/ios-xe-17/products-installation-and-configuration-guides-list.html"
+          - "https://www.cisco.com/c/en/us/support/ios-nx-os-software/ios-xe-17/products-command-reference-list.html"
+        allowed_domains: ["www.cisco.com"]
+        allowed_url_prefixes:
+          - "https://www.cisco.com/c/en/us/support/ios-nx-os-software/ios-xe-17/"
+          - "https://www.cisco.com/c/en/us/td/docs/"
+        exclude_url_patterns: ["\\.pdf$", "\\?"]
+        max_pages: 600
+        max_depth: 2
+
+  - name: "cisco-nx-os"
+    tags: { vendor: "Cisco", product: "NX-OS", source_type: "official_docs" }
+    http:
+      - start_urls:
+          - "https://www.cisco.com/c/en/us/support/ios-nx-os-software/nx-os-software/products-installation-and-configuration-guides-list.html"
+        allowed_domains: ["www.cisco.com"]
+        allowed_url_prefixes:
+          - "https://www.cisco.com/c/en/us/support/ios-nx-os-software/nx-os-software/"
+          - "https://www.cisco.com/c/en/us/td/docs/"
+        exclude_url_patterns: ["\\.pdf$", "\\?"]
+        max_pages: 600
+        max_depth: 2
+
