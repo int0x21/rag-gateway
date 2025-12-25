@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+<#!/usr/bin/env bash
 set -euo pipefail
 
 APP_DIR="/opt/llm/rag-gateway"
@@ -118,6 +118,52 @@ ensure_models_present() {
   [[ -d "${RERANK_DIR}" ]] || die "Rerank model still missing: ${RERANK_DIR}"
 
   log "Model download complete and verified."
+}
+
+detect_python_for_vllm() {
+  # vLLM compatibility often lags behind newest Python; prefer 3.11 if available.
+  local cand
+  for cand in python3.11 python3.10 python3; do
+    if command -v "${cand}" >/dev/null 2>&1; then
+      echo "${cand}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+ensure_vllm_installed() {
+  if [[ "${SKIP_VLLM_INSTALL:-0}" == "1" ]]; then
+    warn "SKIP_VLLM_INSTALL=1 set; not installing vLLM. vllm.service may not start."
+    return 0
+  fi
+
+  if [[ -x "${VLLM_DIR}/.venv/bin/vllm" ]]; then
+    log "vLLM already installed: ${VLLM_DIR}/.venv/bin/vllm"
+    return 0
+  fi
+
+  log "Installing vLLM into ${VLLM_DIR}/.venv"
+  local py
+  py="$(detect_python_for_vllm)" || die "No python3 interpreter found (need python3 / python3.11 recommended)."
+
+  # Create venv as vllm user so ownership is correct
+  sudo -u vllm "${py}" -m venv "${VLLM_DIR}/.venv"
+
+  # Ensure HF cache is writable by vllm
+  chown -R vllm:vllm "${VLLM_DIR}" "${HF_CACHE_DIR}"
+
+  # Install dependencies as vllm user
+  sudo -u vllm "${VLLM_DIR}/.venv/bin/python" -m pip install --upgrade pip wheel >/dev/null
+
+  # vLLM install (GPU/driver dependent). If this fails, logs will show why.
+  if ! sudo -u vllm "${VLLM_DIR}/.venv/bin/pip" install --upgrade "vllm"; then
+    die "Failed to install vLLM. Common causes: incompatible Python version, missing CUDA/toolchain, or unsupported platform. Check pip output above."
+  fi
+
+  [[ -x "${VLLM_DIR}/.venv/bin/vllm" ]] || die "vLLM install completed but CLI missing: ${VLLM_DIR}/.venv/bin/vllm"
+
+  log "vLLM installed successfully."
 }
 
 deploy_app() {
@@ -279,7 +325,6 @@ fix_permissions() {
 }
 
 enable_start_stack() {
-  # Stack is the single entry point
   log "Enabling and starting ${STACK_TARGET}"
   systemctl daemon-reload
   systemctl enable --now "${STACK_TARGET}"
@@ -290,18 +335,28 @@ verify_stack_active() {
   local failed=0
 
   for u in "${REQUIRED_UNITS[@]}"; do
+    local load_state
+    load_state="$(systemctl show -p LoadState --value "${u}" 2>/dev/null || echo "unknown")"
+    if [[ "${load_state}" != "loaded" ]]; then
+      warn "NOT LOADED: ${u} (LoadState=${load_state})"
+      failed=1
+      continue
+    fi
+
     if systemctl is-active --quiet "${u}"; then
       log "OK: ${u} is active"
-    else
-      warn "NOT ACTIVE: ${u}"
-      failed=1
+      continue
     fi
+
+    warn "NOT ACTIVE: ${u}"
+    failed=1
+    systemctl status "${u}" -l --no-pager || true
+    journalctl -u "${u}" -b --no-pager -n 120 || true
   done
 
   if [[ "${failed}" -ne 0 ]]; then
-    warn "One or more units are not active. Showing failing units:"
+    warn "Showing failed units (if any):"
     systemctl --failed || true
-    warn "Tip: check logs for a unit with: journalctl -u <unit> -xe --no-pager"
     die "Stack verification failed."
   fi
 
@@ -322,6 +377,9 @@ main() {
 
   ensure_base_dirs
   ensure_models_present "${repo_root}"
+
+  # New: ensure vLLM runtime exists before starting stack
+  ensure_vllm_installed
 
   deploy_app "${repo_root}"
   setup_gateway_venv
