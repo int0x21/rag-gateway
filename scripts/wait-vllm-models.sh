@@ -1,50 +1,57 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Wait until the vLLM OpenAI-compatible endpoint is reachable AND has at least
-# one model loaded. Optionally assert that a specific model id is present.
-#
-# Dependencies: curl, python3
+TS() { date --iso-8601=seconds; }
+log() { echo "[$(TS)] $*"; }
+
+usage() {
+  cat <<'EOF'
+wait-vllm-models.sh
+  Wait for vLLM / OpenAI-compatible /v1/models endpoint to return at least N models
+  and optionally contain specific model IDs.
+
+Usage:
+  wait-vllm-models.sh --name vllm --url http://127.0.0.1:8000/v1/models \
+    --timeout 180 --min-models 1 --expect-id generator
+
+Options:
+  --name NAME           Friendly name for logs (default: vllm)
+  --url URL             Models endpoint URL (required)
+  --timeout SECONDS     Total time to wait (default: 180)
+  --interval SECONDS    Poll interval (default: 1)
+  --max-time SECONDS    Per-request timeout for curl (default: 3)
+  --min-models N        Minimum number of models required (default: 1)
+  --expect-id ID        Expected model id (repeatable)
+
+Exit codes:
+  0 = ready
+  1 = timeout
+  2 = usage / argument error
+  3 = check failed (transient; only meaningful inside loops/systemd)
+EOF
+}
 
 NAME="vllm"
 URL=""
-TIMEOUT=120
-SLEEP_SECS=1
+TIMEOUT=180
+INTERVAL=1
+MAX_TIME=3
 MIN_MODELS=1
-EXPECT_ID=""
-VERBOSE_EVERY=10
+EXPECT_IDS=()
 
-usage() {
-  cat <<'USAGE'
-wait-vllm-models.sh
-
-Required:
-  --url <url>           vLLM /v1/models endpoint URL (e.g., http://127.0.0.1:8000/v1/models)
-
-Optional:
-  --timeout <seconds>   Total time to wait (default: 120)
-  --sleep <seconds>     Sleep between polls (default: 1)
-  --min-models <n>      Require at least N models in the response (default: 1)
-  --expect-id <id>      Require that a model with .id == <id> exists
-  --name <name>         Friendly name for log output (default: vllm)
-USAGE
-}
-
-log() {
-  echo "[$(date --iso-8601=seconds)] wait-vllm: $*" >&2
-}
-
+# --- arg parsing ---
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --url) URL="$2"; shift 2;;
-    --timeout) TIMEOUT="$2"; shift 2;;
-    --sleep) SLEEP_SECS="$2"; shift 2;;
-    --min-models) MIN_MODELS="$2"; shift 2;;
-    --expect-id) EXPECT_ID="$2"; shift 2;;
-    --name) NAME="$2"; shift 2;;
+    --name) NAME="${2:-}"; shift 2;;
+    --url) URL="${2:-}"; shift 2;;
+    --timeout) TIMEOUT="${2:-}"; shift 2;;
+    --interval) INTERVAL="${2:-}"; shift 2;;
+    --max-time) MAX_TIME="${2:-}"; shift 2;;
+    --min-models) MIN_MODELS="${2:-}"; shift 2;;
+    --expect-id) EXPECT_IDS+=("${2:-}"); shift 2;;
     -h|--help) usage; exit 0;;
     *)
-      log "Unknown argument: $1"
+      log "wait-vllm-models: Unknown arg: $1"
       usage
       exit 2
       ;;
@@ -52,71 +59,116 @@ while [[ $# -gt 0 ]]; do
 done
 
 if [[ -z "${URL}" ]]; then
+  log "wait-vllm-models: --url is required"
   usage
   exit 2
 fi
 
-start_epoch="$(date +%s)"
-end_epoch="$((start_epoch + TIMEOUT))"
+if ! [[ "${TIMEOUT}" =~ ^[0-9]+$ ]] || ! [[ "${INTERVAL}" =~ ^[0-9]+$ ]] || ! [[ "${MAX_TIME}" =~ ^[0-9]+$ ]] || ! [[ "${MIN_MODELS}" =~ ^[0-9]+$ ]]; then
+  log "wait-vllm-models: timeout/interval/max-time/min-models must be integers"
+  exit 2
+fi
 
-log "Waiting for ${NAME} models at ${URL} timeout=${TIMEOUT}s min_models=${MIN_MODELS} expect_id='${EXPECT_ID}'"
+# --- check function ---
+# Returns:
+#   0 ready
+#   3 not ready yet / transient failure
+check_once() {
+  local tmp rc http_code body
 
-attempt=0
-while true; do
-  now="$(date +%s)"
-  if (( now >= end_epoch )); then
-    log "Timeout reached waiting for ${NAME} models"
-    exit 1
+  tmp="$(mktemp)"
+  # Use curl to capture HTTP code and body separately.
+  # -sS: silent but show errors
+  # --max-time: per call timeout
+  # Accept header: encourages JSON
+  http_code="$(
+    curl -sS \
+      --noproxy "*" \
+      --max-time "${MAX_TIME}" \
+      -H "Accept: application/json" \
+      -o "${tmp}" \
+      -w "%{http_code}" \
+      "${URL}" \
+      || true
+  )"
+
+  body="$(cat "${tmp}" 2>/dev/null || true)"
+  rm -f "${tmp}" || true
+
+  # If curl failed hard, http_code may be empty.
+  if [[ -z "${http_code}" ]]; then
+    return 3
   fi
 
-  attempt=$((attempt + 1))
-
-  # Pull models list. Keep curl timeouts short to avoid hanging systemd.
-  body=""
-  if ! body="$(curl --noproxy "*" -sS --show-error --max-time 3 "${URL}" 2>/dev/null)"; then
-    sleep "${SLEEP_SECS}"
-    continue
+  # Non-200 -> not ready yet
+  if [[ "${http_code}" != "200" ]]; then
+    return 3
   fi
 
-  # Validate JSON and compute conditions using python (dependency-light).
-  # Exit codes:
-  #   0 -> ready
-  #   1 -> not ready yet
-  if python3 - "${MIN_MODELS}" "${EXPECT_ID}" <<'PY' <<<"${body}"; then
+  # Empty body -> not ready yet
+  if [[ -z "${body}" ]]; then
+    return 3
+  fi
+
+  # Parse JSON and evaluate conditions using python (no jq dependency).
+  # Prints a single line "OK" when ready.
+  rc=0
+  python3 - <<PY 2>/dev/null || rc=$?
 import json, sys
 
-min_models = int(sys.argv[1])
-expect_id = sys.argv[2]
-
+raw = ${body@Q}
 try:
-    data = json.loads(sys.stdin.read())
+    doc = json.loads(raw)
 except Exception:
-    raise SystemExit(1)
+    sys.exit(3)
 
-models = data.get("data", [])
-if not isinstance(models, list):
-    raise SystemExit(1)
+data = doc.get("data")
+if not isinstance(data, list):
+    sys.exit(3)
 
-if len(models) < min_models:
-    raise SystemExit(1)
+ids = []
+for item in data:
+    if isinstance(item, dict) and "id" in item:
+        ids.append(str(item["id"]))
 
-if expect_id:
-    if not any(isinstance(m, dict) and m.get("id") == expect_id for m in models):
-        raise SystemExit(1)
+min_models = int(${MIN_MODELS})
+expect = ${EXPECT_IDS[@]+"["$(printf '"%s",' "${EXPECT_IDS[@]}" | sed 's/,$//')"]"}
 
-raise SystemExit(0)
+if len(ids) < min_models:
+    sys.exit(3)
+
+for e in expect:
+    if e not in ids:
+        sys.exit(3)
+
+print("OK")
 PY
-  then
-    log "${NAME} is ready (models loaded)"
+
+  if [[ $rc -ne 0 ]]; then
+    return 3
+  fi
+
+  return 0
+}
+
+log "wait-vllm-models: Waiting for ${NAME} models (${URL}) timeout=${TIMEOUT}s min_models=${MIN_MODELS} expect_ids=${EXPECT_IDS[*]:-}"
+
+start_epoch="$(date +%s)"
+deadline=$((start_epoch + TIMEOUT))
+
+while true; do
+  if check_once; then
+    log "wait-vllm-models: ${NAME} models are ready"
     exit 0
   fi
 
-  if (( attempt % VERBOSE_EVERY == 0 )); then
-    # Provide a tiny hint without spamming logs.
-    snippet="$(echo "${body}" | head -c 200 | tr '\n' ' ' || true)"
-    log "${NAME} not ready yet. Snippet: ${snippet}"
+  now="$(date +%s)"
+  if (( now >= deadline )); then
+    log "wait-vllm-models: TIMEOUT waiting for ${NAME} models"
+    exit 1
   fi
 
-  sleep "${SLEEP_SECS}"
+  log "wait-vllm-models: ${NAME} not ready yet (check_failed rc=3)"
+  sleep "${INTERVAL}"
 done
 
