@@ -221,7 +221,7 @@ main() {
     # Test TEI reranking
     rerank_payload='{"model": "bge-reranker-large", "query": "test query", "texts": ["test text 1", "test text 2"]}'
     if response=$(test_post_endpoint "$TEI_RERANK_URL/rerank" "TEI reranking endpoint" "$rerank_payload"); then
-        if echo "$response" | jq '.results | length' >/dev/null 2>&1; then
+        if echo "$response" | jq 'length' >/dev/null 2>&1 && [ "$(echo "$response" | jq 'length')" -eq 2 ]; then
             success "TEI reranking returned valid ranking data"
         else
             error "TEI reranking returned invalid response: $response"
