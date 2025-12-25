@@ -9,12 +9,14 @@ MODELS_DIR="/opt/llm/models"
 QDRANT_DIR="/opt/llm/qdrant"
 TEI_DIR="/opt/llm/tei"
 VLLM_DIR="/opt/llm/vllm"
+VLLM_VENV_DIR="/opt/llm/vllm/.venv"
+
 HF_CACHE_DIR="/opt/llm/hf"
 MODEL_TOOLS_DIR="/opt/llm/model-tools"
 
-log() { printf '%s\n' "[$(date -Is)] $*"; }
+log()  { printf '%s\n' "[$(date -Is)] $*"; }
 warn() { printf '%s\n' "[$(date -Is)] WARNING: $*" >&2; }
-die() { printf '%s\n' "[$(date -Is)] ERROR: $*" >&2; exit 1; }
+die()  { printf '%s\n' "[$(date -Is)] ERROR: $*" >&2; exit 1; }
 
 need_root() {
   if [[ "${EUID}" -ne 0 ]]; then
@@ -70,6 +72,23 @@ remove_units_dropins_and_baks() {
   systemctl reset-failed 2>/dev/null || true
 }
 
+remove_vllm_dir_but_keep_venv() {
+  # User requirement: keep /opt/llm/vllm/.venv to avoid long reinstall times.
+  if [[ -d "${VLLM_DIR}" ]]; then
+    if [[ -d "${VLLM_VENV_DIR}" ]]; then
+      log "Removing ${VLLM_DIR} contents except ${VLLM_VENV_DIR}"
+      # Delete everything directly under VLLM_DIR except .venv
+      find "${VLLM_DIR}" -mindepth 1 -maxdepth 1 \
+        ! -name ".venv" \
+        -exec rm -rf {} + 2>/dev/null || true
+      log "Kept vLLM virtualenv: ${VLLM_VENV_DIR}"
+    else
+      log "Removing ${VLLM_DIR} (no .venv present to preserve)"
+      rm -rf "${VLLM_DIR}" || true
+    fi
+  fi
+}
+
 remove_paths_keep_models() {
   log "Removing application/config/support dirs (keeping ${MODELS_DIR})"
 
@@ -78,7 +97,8 @@ remove_paths_keep_models() {
 
   rm -rf "${QDRANT_DIR}" || true
   rm -rf "${TEI_DIR}" || true
-  rm -rf "${VLLM_DIR}" || true
+  remove_vllm_dir_but_keep_venv
+
   rm -rf "${HF_CACHE_DIR}" || true
   rm -rf "${MODEL_TOOLS_DIR}" || true
 
