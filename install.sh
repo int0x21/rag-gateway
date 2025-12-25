@@ -401,18 +401,26 @@ deploy_cli_tool() {
   local bin_path="/usr/local/bin/rag-gateway-crawl"
   
    cat > "${bin_path}" <<'EOF'
-#!/usr/bin/env python3
+#!/bin/bash
+# RAG Gateway CLI Tool
+# Use the virtual environment if it exists
+VENV_PYTHON="/opt/llm/rag-gateway/.venv/bin/python3"
+if [ -x "$VENV_PYTHON" ]; then
+    exec "$VENV_PYTHON" -c "
 import sys
-import os
-# Use the RAG Gateway virtual environment
-venv_python = '/opt/llm/rag-gateway/.venv/bin/python3'
-if os.path.exists(venv_python):
-    os.execv(venv_python, [venv_python] + sys.argv)
-else:
-    # Fallback to system python3 if venv doesn't exist
-    sys.path.insert(0, '/opt/llm/rag-gateway')
-    from rag_gateway.ingestion.cli import main
-    sys.exit(main())
+sys.path.insert(0, '/opt/llm/rag-gateway')
+from rag_gateway.ingestion.cli import main
+sys.exit(main())
+" "$@"
+else
+    # Fallback to system python3
+    exec python3 -c "
+import sys
+sys.path.insert(0, '/opt/llm/rag-gateway')
+from rag_gateway.ingestion.cli import main
+sys.exit(main())
+" "$@"
+fi
 EOF
   
   chmod +x "${bin_path}"
