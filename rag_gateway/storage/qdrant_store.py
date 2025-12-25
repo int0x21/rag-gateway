@@ -71,11 +71,11 @@ class QdrantVectorStore:
             if must:
                 qfilter = qm.Filter(must=must)
 
-        res = self.client.search(
+        res = self.client.query_points(
             collection_name=self.collection,
-            query_vector=vector,
+            query=vector,
             limit=top_n,
-            query_filter=qfilter,
+            filter=qfilter,
             with_payload=True,
         )
         hits: List[QdrantHit] = []
