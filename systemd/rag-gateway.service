@@ -8,6 +8,7 @@ Type=simple
 User=rag
 Group=rag
 WorkingDirectory=/opt/llm/rag-gateway
+Environment=RAG_GATEWAY_CONFIG=/etc/rag-gateway/config.yaml
 ExecStart=/opt/llm/rag-gateway/.venv/bin/uvicorn rag_gateway.app:app --host 127.0.0.1 --port 9000
 Restart=always
 RestartSec=2

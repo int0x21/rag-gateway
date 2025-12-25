@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Dict
 
 from fastapi import FastAPI, HTTPException
@@ -66,7 +67,12 @@ def create_app(cfg: AppConfig) -> FastAPI:
     app = FastAPI(title="RAG Gateway", version="0.1.0")
 
     bm25 = TantivyBM25(cfg.paths.tantivy_index_dir)
-    tei = TEIClient(cfg.upstreams.tei_embed_url, cfg.upstreams.tei_rerank_url, cfg.models.embed_model, cfg.models.rerank_model)
+    tei = TEIClient(
+        cfg.upstreams.tei_embed_url,
+        cfg.upstreams.tei_rerank_url,
+        cfg.models.embed_model,
+        cfg.models.rerank_model,
+    )
     vllm = VLLMClient(cfg.upstreams.vllm_url)
 
     state: Dict[str, Any] = {"deps": None}
@@ -94,6 +100,50 @@ def create_app(cfg: AppConfig) -> FastAPI:
     @app.get("/health")
     async def health():
         return {"ok": True}
+
+    @app.get("/v1/models")
+    async def list_models():
+        return {
+            "object": "list",
+            "data": [
+                {"id": cfg.models.generator_model, "object": "model", "owned_by": "local"},
+                {"id": cfg.models.embed_model, "object": "model", "owned_by": "local"},
+                {"id": cfg.models.rerank_model, "object": "model", "owned_by": "local"},
+            ],
+        }
+
+    @app.post("/v1/embeddings")
+    async def embeddings(payload: Dict[str, Any]):
+        deps = _deps()
+        requested_model = payload.get("model")
+        if requested_model and requested_model != cfg.models.embed_model:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported embedding model '{requested_model}'. Only '{cfg.models.embed_model}' is available.",
+            )
+
+        model = cfg.models.embed_model
+        inp = payload.get("input")
+        if inp is None:
+            raise HTTPException(status_code=400, detail="Missing 'input'")
+
+        if isinstance(inp, str):
+            vectors = await deps.tei.embed_many([inp])
+            return {
+                "object": "list",
+                "data": [{"object": "embedding", "index": 0, "embedding": vectors[0]}],
+                "model": model,
+            }
+
+        if isinstance(inp, list):
+            vectors = await deps.tei.embed_many([str(x) for x in inp])
+            return {
+                "object": "list",
+                "data": [{"object": "embedding", "index": i, "embedding": v} for i, v in enumerate(vectors)],
+                "model": model,
+            }
+
+        raise HTTPException(status_code=400, detail="'input' must be a string or list")
 
     @app.post("/ingest")
     async def ingest(req: IngestRequest):
@@ -199,7 +249,7 @@ def create_app(cfg: AppConfig) -> FastAPI:
             async def _gen():
                 async for b in vllm.stream_chat_completions(upstream_payload):
                     yield b
-            return StreamingResponse(_gen(), media_type="application/json")
+            return StreamingResponse(_gen(), media_type="text/event-stream")
 
         out = await vllm.chat_completions(upstream_payload)
         return JSONResponse(out)
@@ -207,9 +257,15 @@ def create_app(cfg: AppConfig) -> FastAPI:
     return app
 
 
+# Fail-fast bootstrap:
+# If config or app construction fails, the service should fail and log the reason.
+logging.basicConfig(level=logging.INFO)
+_cfg_path = os.environ.get("RAG_GATEWAY_CONFIG", CONFIG_PATH_DEFAULT)
+
 try:
-    _cfg = load_config(CONFIG_PATH_DEFAULT)
+    _cfg = load_config(_cfg_path)
     app = create_app(_cfg)
 except Exception:
-    app = FastAPI(title="RAG Gateway (unconfigured)")
+    logging.exception("Failed to initialize RAG Gateway using config: %s", _cfg_path)
+    raise
 
