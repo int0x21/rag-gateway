@@ -5,7 +5,7 @@ from typing import Annotated, Dict
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
-from ..api.deps import ConfigDep, TEIDep
+from ..deps import ConfigDep, TEIDep
 from ..core.models import ChatCompletionsRequest
 
 

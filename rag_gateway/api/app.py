@@ -9,7 +9,7 @@ from fastapi.responses import JSONResponse
 
 from ..config import load_config, AppConfig
 from ..core.models import ChatCompletionsRequest
-from ..api.deps import set_config, initialize_storage, ConfigDep, TEIDep
+from .deps import set_config, initialize_storage, ConfigDep, TEIDep
 from ..storage.vllm_client import VLLMClient
 
 
@@ -42,8 +42,8 @@ def create_app(cfg: AppConfig) -> FastAPI:
             ],
         }
 
-    from ..api.routes.embeddings import router as embeddings_router
-    from ..api.routes.chat import router as chat_router
+    from .routes.embeddings import router as embeddings_router
+    from .routes.chat import router as chat_router
     app.include_router(embeddings_router)
     app.include_router(chat_router)
 

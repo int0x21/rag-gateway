@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from ..api.deps import ConfigDep
+from ..deps import ConfigDep
 
 
 router = APIRouter()
