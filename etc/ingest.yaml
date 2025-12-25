@@ -27,3 +27,22 @@ qdrant_collection: "chunks_v1"
 
 # Preview settings
 preview_items: 10
+
+# Logging configuration
+logging:
+  level: "INFO"
+  embed_progress: true
+  failure_details: true
+
+# TEI embedding configuration
+tei:
+  embed_batch_size: 10
+  embed_min_batch_size: 1
+  embed_max_retries: 3
+  embed_retry_delay: 1.0
+  embed_retry_backoff: 2.0
+  embed_max_concurrent: 4
+  embed_timeout: 120
+  embed_continue_on_failure: true
+  embed_log_failures: true
+  embed_failure_log_dir: "/opt/llm/rag-gateway/var/log"

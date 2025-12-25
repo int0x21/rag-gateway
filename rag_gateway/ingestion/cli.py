@@ -399,6 +399,9 @@ async def run_crawl(
                     continue
 
                 logger.info(f"  Ingesting {len(docs)} documents...")
+                # Get TEI configuration for embedding
+                tei_config = ingest_cfg.get("tei", {})
+
                 res = await ingest_documents(
                     documents=docs,
                     tei=tei,
@@ -414,6 +417,9 @@ async def run_crawl(
                     incremental=ingest_cfg.get("incremental", True),
                     skip_unchanged=ingest_cfg.get("skip_unchanged", True),
                     dry_run=False,
+                    embed_batch_size=tei_config.get("embed_batch_size", 10),
+                    embed_max_concurrent=tei_config.get("embed_max_concurrent", 4),
+                    embed_config=tei_config,
                 )
                 per_source.append({"name": src_name, "dry_run": False, **res})
                 logger.info(f"  Ingested: {res['chunks']} chunks, {res['updated']} updated, {res['skipped']} skipped")
