@@ -33,6 +33,13 @@ REQUIRED_UNITS=(
   "rag-crawl.timer"
 )
 
+# Tunable timeouts (seconds)
+: "${VERIFY_QDRANT_TIMEOUT:=120}"
+: "${VERIFY_TEI_TIMEOUT:=600}"
+: "${VERIFY_VLLM_TIMEOUT:=900}"
+: "${VERIFY_GATEWAY_TIMEOUT:=600}"
+: "${VERIFY_TIMER_TIMEOUT:=60}"
+
 timestamp() { date +"%Y%m%d-%H%M%S"; }
 log() { printf '%s\n' "[$(date -Is)] $*"; }
 warn() { printf '%s\n' "[$(date -Is)] WARNING: $*" >&2; }
@@ -175,11 +182,8 @@ deploy_app() {
 deploy_runtime_helpers() {
   local repo_root="$1"
   log "Deploying runtime helper scripts to ${APP_BIN_DIR}"
-
   install -d -m 0755 "${APP_BIN_DIR}"
-
   install -m 0755 "${repo_root}/scripts/wait-http.sh" "${APP_BIN_DIR}/wait-http.sh"
-
   chown root:root "${APP_BIN_DIR}/wait-http.sh"
   chmod 0755 "${APP_BIN_DIR}/wait-http.sh"
 }
@@ -231,7 +235,6 @@ deploy_configs() {
 
   log "Patching ${CONF_DIR}/config.yaml paths for this filesystem layout"
   python3 - <<PY
-import sys
 from pathlib import Path
 import yaml
 
@@ -318,22 +321,42 @@ enable_start_stack() {
   systemctl enable --now "${STACK_TARGET}"
 }
 
-wait_unit_active() {
+wait_unit_active_verbose() {
   local unit="$1"
   local timeout="$2"
   local deadline=$(( $(date +%s) + timeout ))
+  local i=0
 
   while (( $(date +%s) < deadline )); do
     if systemctl is-active --quiet "${unit}"; then
       return 0
     fi
+
+    # Print a progress line every 10 seconds to avoid "hang" perception
+    if (( i % 10 == 0 )); then
+      local st
+      st="$(systemctl show -p ActiveState -p SubState --value "${unit}" 2>/dev/null | tr '\n' ' ')"
+      log "Waiting for ${unit} (${st:-unknown})... ${i}/${timeout}s"
+    fi
+    i=$((i+1))
     sleep 1
   done
   return 1
 }
 
+unit_timeout_for() {
+  case "$1" in
+    qdrant.service) echo "${VERIFY_QDRANT_TIMEOUT}" ;;
+    tei-embed.service|tei-rerank.service) echo "${VERIFY_TEI_TIMEOUT}" ;;
+    vllm.service) echo "${VERIFY_VLLM_TIMEOUT}" ;;
+    rag-gateway.service) echo "${VERIFY_GATEWAY_TIMEOUT}" ;;
+    rag-crawl.timer) echo "${VERIFY_TIMER_TIMEOUT}" ;;
+    *) echo 120 ;;
+  esac
+}
+
 verify_stack_active() {
-  log "Verifying stack units are active (with settle time)"
+  log "Verifying stack units are active"
   local failed=0
 
   for u in "${REQUIRED_UNITS[@]}"; do
@@ -345,25 +368,19 @@ verify_stack_active() {
       continue
     fi
 
-    # Give slow services time to settle (TEI/vLLM/gateway can take minutes on cold start)
-    local t=60
-    case "${u}" in
-      tei-embed.service|tei-rerank.service) t=900;;
-      vllm.service) t=1200;;
-      rag-gateway.service) t=900;;
-      rag-crawl.timer) t=120;;
-      *) t=120;;
-    esac
+    local t
+    t="$(unit_timeout_for "${u}")"
 
-    if wait_unit_active "${u}" "${t}"; then
+    if wait_unit_active_verbose "${u}" "${t}"; then
       log "OK: ${u} is active"
       continue
     fi
 
-    warn "NOT ACTIVE: ${u}"
+    warn "NOT ACTIVE after ${t}s: ${u}"
     failed=1
+
     systemctl status "${u}" -l --no-pager || true
-    journalctl -u "${u}" -b --no-pager -n 120 || true
+    journalctl -u "${u}" -b --no-pager -n 200 || true
   done
 
   if [[ "${failed}" -ne 0 ]]; then
@@ -402,6 +419,7 @@ main() {
   verify_stack_active
 
   log "Install complete."
+  log "Tip: tune verification timeouts via env vars, e.g.: VERIFY_VLLM_TIMEOUT=300 ./install.sh"
 }
 
 main "$@"
