@@ -19,60 +19,68 @@ async def chat_completions(
     retrieval: RetrievalDep,
     vllm: VLLMDep,
 ):
-    mode = req.rag.mode if req.rag and req.rag.mode else "selection"
-    filters = req.rag.filters if req.rag and req.rag.filters else {}
+    try:
+        mode = req.rag.mode if req.rag and req.rag.mode else "selection"
+        filters = req.rag.filters if req.rag and req.rag.filters else {}
 
-    evidence_top_k = cfg.retrieval.evidence_top_k
-    if mode in cfg.retrieval.mode_overrides and "evidence_top_k" in cfg.retrieval.mode_overrides[mode]:
-        evidence_top_k = int(cfg.retrieval.mode_overrides[mode]["evidence_top_k"])
+        evidence_top_k = cfg.retrieval.evidence_top_k
+        if mode in cfg.retrieval.mode_overrides and "evidence_top_k" in cfg.retrieval.mode_overrides[mode]:
+            evidence_top_k = int(cfg.retrieval.mode_overrides[mode]["evidence_top_k"])
 
-    if cfg.safety.redact:
-        for msg in req.messages:
-            if msg.get("role") == "user" and isinstance(msg.get("content"), str):
-                msg["content"] = redact_text(msg["content"], cfg.safety.redaction_patterns)
+        if cfg.safety.redact:
+            for msg in req.messages:
+                if msg.get("role") == "user" and isinstance(msg.get("content"), str):
+                    msg["content"] = redact_text(msg["content"], cfg.safety.redaction_patterns)
 
-    user_text = ""
-    for m in reversed(req.messages):
-        if m.get("role") == "user":
-            c = m.get("content", "")
-            if isinstance(c, str):
-                user_text = c
-                break
+        user_text = ""
+        for m in reversed(req.messages):
+            if m.get("role") == "user":
+                c = m.get("content", "")
+                if isinstance(c, str):
+                    user_text = c
+                    break
 
-    retrieval_query = user_text.strip() or "help"
+        retrieval_query = user_text.strip() or "help"
 
-    result = await retrieval.retrieve(
-        query=retrieval_query,
-        filters=filters if filters else None,
-        evidence_top_k=evidence_top_k,
-    )
+        result = await retrieval.retrieve(
+            query=retrieval_query,
+            filters=filters if filters else None,
+            evidence_top_k=evidence_top_k,
+        )
 
-    evidence_block = build_evidence_block(result["evidence"])
+        evidence_block = build_evidence_block(result["evidence"])
 
-    system = (
-        cfg.prompting.system_preamble.strip()
-        + "\n\n"
-        + cfg.prompting.citation_rule.strip()
-        + "\n\n"
-        + evidence_block
-    )
-    msgs = [{"role": "system", "content": system}]
-    msgs.extend(req.messages)
+        system = (
+            cfg.prompting.system_preamble.strip()
+            + "\n\n"
+            + cfg.prompting.citation_rule.strip()
+            + "\n\n"
+            + evidence_block
+        )
+        msgs = [{"role": "system", "content": system}]
+        msgs.extend(req.messages)
 
-    upstream_payload: Dict[str, Any] = {
-        "model": cfg.models.generator_model if req.model is None else req.model,
-        "messages": msgs,
-        "stream": bool(req.stream),
-    }
+        upstream_payload: Dict[str, Any] = {
+            "model": cfg.models.generator_model if req.model is None else req.model,
+            "messages": msgs,
+            "stream": bool(req.stream),
+        }
 
-    if req.stream:
-        async def _gen():
-            async for b in vllm.stream_chat_completions(upstream_payload):
-                yield b
-        return StreamingResponse(_gen(), media_type="text/event-stream")
+        if req.stream:
+            async def _gen():
+                async for b in vllm.stream_chat_completions(upstream_payload):
+                    yield b
+            return StreamingResponse(_gen(), media_type="text/event-stream")
 
-    out = await vllm.chat_completions(upstream_payload)
-    return out
+        out = await vllm.chat_completions(upstream_payload)
+        return out
+
+    except Exception as e:
+        # Return proper JSON error instead of plain text
+        raise HTTPException(
+            status_code=500,
+            detail=f"RAG processing failed: {str(e)}"
+        )
 
 
 async def get_retrieval(cfg, req: ChatCompletionsRequest, retrieval_service: Any) -> dict:

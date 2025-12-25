@@ -79,7 +79,19 @@ class QdrantVectorStore:
             with_payload=True,
         )
         hits: List[QdrantHit] = []
-        for r in res:
+
+        # Handle different Qdrant API response structures
+        if hasattr(res, 'points') and res.points is not None:
+            # Newer API: results wrapped in .points
+            results = res.points
+        elif hasattr(res, 'result') and hasattr(res.result, 'points'):
+            # Alternative structure: res.result.points
+            results = res.result.points
+        else:
+            # Fallback: assume direct iteration (older API or different structure)
+            results = res
+
+        for r in results:
             payload = r.payload or {}
             chunk_id = payload.get("chunk_id", "")
             hits.append(QdrantHit(chunk_id=str(chunk_id), score=float(r.score), payload=payload))
