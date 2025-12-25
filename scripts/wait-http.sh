@@ -4,93 +4,69 @@ set -euo pipefail
 NAME=""
 URL=""
 METHOD="GET"
-JSON_BODY=""
+JSON_PAYLOAD=""
 TIMEOUT=60
-INTERVAL=1
-MAX_TIME_PER_REQ=3
+INTERVAL=2
 
-usage() {
-  cat <<'EOF'
-wait-http.sh --name NAME --url URL [--method GET|POST|PUT] [--json JSON] [--timeout SECONDS]
-
-Examples:
-  wait-http.sh --name qdrant --url http://127.0.0.1:6333/collections --timeout 60
-  wait-http.sh --name tei-embed --url http://127.0.0.1:8081/health --timeout 120
-EOF
+log() {
+  printf '[%s] wait-http: %s\n' "$(date --iso-8601=seconds)" "$*"
 }
 
-ts() { date -Is; }
-
-log() { echo "[$(ts)] wait-http: $*"; }
-
-fail() { echo "[$(ts)] wait-http: ERROR: $*" >&2; exit 1; }
+usage() {
+  cat <<EOF
+Usage: wait-http.sh --name <name> --url <url> [--method GET|POST] [--json '<json>'] [--timeout <sec>] [--interval <sec>]
+EOF
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --name) NAME="$2"; shift 2;;
     --url) URL="$2"; shift 2;;
-    --method) METHOD="${2^^}"; shift 2;;
-    --json) JSON_BODY="$2"; shift 2;;
+    --method) METHOD="$2"; shift 2;;
+    --json) JSON_PAYLOAD="$2"; shift 2;;
     --timeout) TIMEOUT="$2"; shift 2;;
     --interval) INTERVAL="$2"; shift 2;;
-    --max-time) MAX_TIME_PER_REQ="$2"; shift 2;;
     -h|--help) usage; exit 0;;
-    *) fail "Unknown argument: $1";;
+    *) echo "Unknown arg: $1" >&2; usage; exit 2;;
   esac
 done
 
-[[ -n "$NAME" ]] || fail "--name is required"
-[[ -n "$URL" ]] || fail "--url is required"
+if [[ -z "$NAME" || -z "$URL" ]]; then
+  usage
+  exit 2
+fi
 
-start_epoch="$(date +%s)"
-deadline=$(( start_epoch + TIMEOUT ))
+log "Waiting for ${NAME} (${METHOD} ${URL}) timeout=${TIMEOUT}s interval=${INTERVAL}s"
 
-log "Waiting for ${NAME} (${METHOD} ${URL}) timeout=${TIMEOUT}s"
+deadline=$(( $(date +%s) + TIMEOUT ))
+attempt=0
 
-last_code=""
-last_body=""
+while (( $(date +%s) < deadline )); do
+  attempt=$((attempt + 1))
 
-while true; do
-  now="$(date +%s)"
-  if (( now >= deadline )); then
-    fail "${NAME} not ready after ${TIMEOUT}s (last HTTP=${last_code:-n/a}) body=${last_body:-<empty>}"
-  fi
-
-  tmp_body="$(mktemp)"
-  http_code=""
-
-  # Do NOT use -f, because we want to capture the body/status for diagnostics.
-  if [[ "$METHOD" == "GET" ]]; then
-    http_code="$(curl --noproxy "*" -sS -o "$tmp_body" -w "%{http_code}" --max-time "$MAX_TIME_PER_REQ" "$URL" || true)"
+  if [[ -n "$JSON_PAYLOAD" ]]; then
+    # Capture HTTP status without printing body
+    code="$(curl --noproxy "*" -sS -o /dev/null -w '%{http_code}' \
+      --max-time 5 -H "Content-Type: application/json" -X "$METHOD" \
+      "$URL" -d "$JSON_PAYLOAD" || true)"
   else
-    # If sending JSON, force correct header.
-    if [[ -n "$JSON_BODY" ]]; then
-      http_code="$(curl --noproxy "*" -sS -o "$tmp_body" -w "%{http_code}" --max-time "$MAX_TIME_PER_REQ" \
-        -H "Content-Type: application/json" -X "$METHOD" --data-raw "$JSON_BODY" "$URL" || true)"
-    else
-      http_code="$(curl --noproxy "*" -sS -o "$tmp_body" -w "%{http_code}" --max-time "$MAX_TIME_PER_REQ" \
-        -X "$METHOD" "$URL" || true)"
-    fi
+    code="$(curl --noproxy "*" -sS -o /dev/null -w '%{http_code}' \
+      --max-time 5 -X "$METHOD" "$URL" || true)"
   fi
 
-  body="$(tr -d '\r' <"$tmp_body" | head -c 300 || true)"
-  rm -f "$tmp_body"
-
-  # Success on any 2xx/3xx.
-  if [[ "$http_code" =~ ^2|^3 ]]; then
-    log "${NAME} is ready (HTTP ${http_code})"
+  if [[ "$code" =~ ^2[0-9]{2}$ ]]; then
+    log "${NAME} is ready (HTTP ${code})"
     exit 0
   fi
 
-  # Emit a periodic hint so it never looks “silently stuck”.
-  # Keep it low-noise: print only when status changes or every ~10 seconds.
-  if [[ "$http_code" != "$last_code" || $(( (now - start_epoch) % 10 )) -eq 0 ]]; then
-    log "${NAME} not ready yet (HTTP ${http_code:-n/a}) body=${body:-<empty>}"
+  if (( attempt % 10 == 0 )); then
+    remaining=$(( deadline - $(date +%s) ))
+    log "Still waiting for ${NAME} (last HTTP ${code:-err}); remaining ${remaining}s"
   fi
-
-  last_code="$http_code"
-  last_body="$body"
 
   sleep "$INTERVAL"
 done
+
+log "ERROR: timeout waiting for ${NAME} (${METHOD} ${URL})"
+exit 1
 

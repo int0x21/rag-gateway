@@ -1,35 +1,39 @@
 [Unit]
 Description=RAG Gateway (FastAPI)
-After=network-online.target qdrant.service tei-embed.service tei-rerank.service vllm.service
 Wants=network-online.target
+After=network-online.target
+
+# Hard dependencies for correct startup ordering
 Requires=qdrant.service tei-embed.service tei-rerank.service vllm.service
+After=qdrant.service tei-embed.service tei-rerank.service vllm.service
 
 [Service]
 Type=simple
-User=rag
-Group=rag
+User=llm
+Group=llm
 WorkingDirectory=/opt/llm/rag-gateway
 
 Environment=RAG_GATEWAY_CONFIG=/etc/rag-gateway/config.yaml
+Environment=PYTHONUNBUFFERED=1
 
-# Readiness gating (order != readiness). Use helper script installed by install.sh.
+# Readiness gates: block until dependencies respond
+# Qdrant ready
 ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name qdrant --url http://127.0.0.1:6333/collections --method GET --timeout 180
 
-# vLLM: don't start gateway until vLLM is answering OpenAI-compatible requests
+# vLLM ready (OpenAI-compatible)
 ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name vllm --url http://127.0.0.1:8000/v1/models --method GET --timeout 600
 
-# TEI embed: send valid JSON as ONE argument; use list input to avoid 4xx
-ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name tei-embed --url http://127.0.0.1:8081/v1/embeddings --method POST --json '{"model":"Qwen/Qwen3-Embedding-8B","input":["ready"]}' --timeout 600
+# TEI Embeddings ready (valid JSON; input as list)
+ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name tei-embed --url http://127.0.0.1:8081/v1/embeddings --method POST --json '{"model":"Qwen/Qwen3-Embedding-8B","input":["ready"]}' --timeout 300
 
-# TEI rerank: match the schema your client uses (texts)
-ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name tei-rerank --url http://127.0.0.1:8082/v1/rerank --method POST --json '{"model":"BAAI/bge-reranker-large","query":"ready","texts":["ready"]}' --timeout 600
+# TEI Rerank ready (valid JSON; schema uses texts array)
+ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name tei-rerank --url http://127.0.0.1:8082/v1/rerank --method POST --json '{"model":"BAAI/bge-reranker-large","query":"ready","texts":["ready"]}' --timeout 300
 
+ExecStart=/opt/llm/rag-gateway/.venv/bin/python -m uvicorn rag_gateway.app:app --host 127.0.0.1 --port 9000
 
-ExecStart=/opt/llm/rag-gateway/.venv/bin/uvicorn rag_gateway.app:app --host 127.0.0.1 --port 9000
-
-Restart=always
-RestartSec=5
-TimeoutStartSec=20min
+Restart=on-failure
+RestartSec=2
+TimeoutStartSec=900
 
 [Install]
 WantedBy=multi-user.target
