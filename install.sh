@@ -1,376 +1,383 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# ==============================================================================
-# rag-gateway installer
-# - Ensures system users
-# - Deploys app + helper scripts + config + systemd units
-# - Installs vLLM into /opt/llm/vllm/.venv
-# - Starts rag-stack.target
-# - Verifies units are active (bounded wait)
-# ==============================================================================
+APP_DIR="/opt/llm/rag-gateway"
+CONF_DIR="/etc/rag-gateway"
+SYSTEMD_DIR="/etc/systemd/system"
+MODELS_DIR="/opt/llm/models"
 
-ts() { date -Is; }
-log() { echo "[$(ts)] $*"; }
-warn() { echo "[$(ts)] WARNING: $*" >&2; }
-die() { echo "[$(ts)] ERROR: $*" >&2; exit 1; }
+QDRANT_DIR="/opt/llm/qdrant"
+TEI_DIR="/opt/llm/tei"
+TEI_CACHE_DIR="/opt/llm/tei/cache"
+VLLM_DIR="/opt/llm/vllm"
+HF_CACHE_DIR="/opt/llm/hf"
 
-require_root() {
-  if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
-    die "This installer must be run as root."
-  fi
-}
+APP_BIN_DIR="${APP_DIR}/bin"
 
-have_cmd() { command -v "$1" >/dev/null 2>&1; }
+VAR_DIR="${APP_DIR}/var"
+TANTIVY_DIR="${VAR_DIR}/tantivy"
+SCHED_DIR="${VAR_DIR}/scheduler"
+SCHED_LOCK="${SCHED_DIR}/crawl.lock"
 
-require_cmds() {
-  local missing=()
-  for c in rsync curl python3 systemctl useradd groupadd install; do
-    have_cmd "$c" || missing+=("$c")
-  done
-  if ((${#missing[@]} > 0)); then
-    die "Missing required commands: ${missing[*]}"
+GENERATOR_DIR="${MODELS_DIR}/generator/DeepSeek-R1-Distill-Qwen-32B"
+EMBED_DIR="${MODELS_DIR}/embeddings/Qwen3-Embedding-8B"
+RERANK_DIR="${MODELS_DIR}/rerank/bge-reranker-large"
+
+STACK_TARGET="rag-stack.target"
+REQUIRED_UNITS=(
+  "qdrant.service"
+  "tei-embed.service"
+  "tei-rerank.service"
+  "vllm.service"
+  "rag-gateway.service"
+  "rag-crawl.timer"
+)
+
+# Tunable timeouts (seconds)
+: "${VERIFY_QDRANT_TIMEOUT:=120}"
+: "${VERIFY_TEI_TIMEOUT:=180}"
+: "${VERIFY_VLLM_TIMEOUT:=300}"
+: "${VERIFY_GATEWAY_TIMEOUT:=120}"
+: "${VERIFY_TIMER_TIMEOUT:=60}"
+
+timestamp() { date +"%Y%m%d-%H%M%S"; }
+log() { printf '%s\n' "[$(date -Is)] $*"; }
+warn() { printf '%s\n' "[$(date -Is)] WARNING: $*" >&2; }
+die() { printf '%s\n' "[$(date -Is)] ERROR: $*" >&2; exit 1; }
+
+need_root() {
+  if [[ "${EUID}" -ne 0 ]]; then
+    die "This script must be run as root."
   fi
 }
 
 detect_repo_root() {
-  # Prefer git root if available; otherwise script directory (resolved).
-  local here
-  here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-
-  if have_cmd git && git -C "$here" rev-parse --show-toplevel >/dev/null 2>&1; then
-    git -C "$here" rev-parse --show-toplevel
-  else
-    echo "$here"
+  local script_dir
+  script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [[ -f "${script_dir}/pyproject.toml" && -d "${script_dir}/rag_gateway" && -d "${script_dir}/systemd" && -d "${script_dir}/etc" ]]; then
+    echo "${script_dir}"
+    return 0
   fi
+  die "Could not detect repo root. Expected pyproject.toml + rag_gateway/ + etc/ + systemd/ next to install.sh."
 }
 
-# --- Global paths (filesystem layout) -----------------------------------------
-LLM_ROOT="/opt/llm"
-APP_DIR="${LLM_ROOT}/rag-gateway"
-APP_BIN="${APP_DIR}/bin"
-APP_STATE="${APP_DIR}/state"
-APP_VENV="${APP_DIR}/.venv"
-
-VLLM_DIR="${LLM_ROOT}/vllm"
-VLLM_VENV="${VLLM_DIR}/.venv"
-
-MODELS_DIR="${LLM_ROOT}/models"
-CONFIG_DIR="/etc/rag-gateway"
-SYSTEMD_DIR="/etc/systemd/system"
-
-# --- Users --------------------------------------------------------------------
-ensure_user() {
-  local user="$1"
+ensure_group_user() {
+  local name="$1"
   local home="${2:-/nonexistent}"
   local shell="${3:-/usr/sbin/nologin}"
 
-  if id -u "$user" >/dev/null 2>&1; then
+  if ! getent group "${name}" >/dev/null 2>&1; then
+    log "Creating system group: ${name}"
+    groupadd --system "${name}"
+  else
+    log "System group exists: ${name}"
+  fi
+
+  if ! id -u "${name}" >/dev/null 2>&1; then
+    log "Creating system user: ${name}"
+    useradd --system --gid "${name}" --home-dir "${home}" --shell "${shell}" --no-create-home "${name}"
+  else
+    log "System user exists: ${name}"
+  fi
+}
+
+assert_system_user() {
+  local name="$1"
+  if ! id -u "${name}" >/dev/null 2>&1; then
+    die "Required system user missing: ${name}"
+  fi
+}
+
+ensure_base_dirs() {
+  log "Creating base directories"
+  install -d -m 0755 /opt/llm
+  install -d -m 0755 "${APP_DIR}" "${APP_BIN_DIR}"
+  install -d -m 0755 "${CONF_DIR}"
+  install -d -m 0755 "${MODELS_DIR}"
+
+  install -d -m 0755 "${QDRANT_DIR}" "${QDRANT_DIR}/config"
+  install -d -m 0755 "${TEI_DIR}" "${TEI_CACHE_DIR}"
+  install -d -m 0755 "${VLLM_DIR}"
+  install -d -m 0755 "${HF_CACHE_DIR}"
+}
+
+ensure_models_present() {
+  local repo_root="$1"
+
+  if [[ "${SKIP_MODEL_DOWNLOAD:-0}" == "1" ]]; then
+    warn "SKIP_MODEL_DOWNLOAD=1 set; skipping model presence checks/downloads."
     return 0
   fi
 
-  # Ensure a matching group exists (system account style)
-  if ! getent group "$user" >/dev/null 2>&1; then
-    groupadd -r "$user" || true
+  local missing=0
+  [[ -d "${GENERATOR_DIR}" ]] || missing=1
+  [[ -d "${EMBED_DIR}" ]] || missing=1
+  [[ -d "${RERANK_DIR}" ]] || missing=1
+
+  if [[ "${missing}" -eq 0 ]]; then
+    log "Models present under ${MODELS_DIR}"
+    return 0
   fi
 
-  useradd -r \
-    -g "$user" \
-    -d "$home" \
-    -s "$shell" \
-    "$user"
+  log "One or more required model directories are missing; downloading models now."
+  local dl="${repo_root}/scripts/download-models.sh"
+  [[ -x "${dl}" ]] || die "Missing or non-executable: ${dl} (run: chmod +x scripts/download-models.sh)"
+  "${dl}"
+
+  [[ -d "${GENERATOR_DIR}" ]] || die "Generator model still missing: ${GENERATOR_DIR}"
+  [[ -d "${EMBED_DIR}" ]] || die "Embedding model still missing: ${EMBED_DIR}"
+  [[ -d "${RERANK_DIR}" ]] || die "Rerank model still missing: ${RERANK_DIR}"
+  log "Model download complete and verified."
 }
 
-create_users() {
-  log "Ensuring system users exist"
-  ensure_user qdrant
-  ensure_user tei
-  ensure_user vllm
-  ensure_user rag
+detect_python_for_vllm() {
+  local cand
+  for cand in python3.11 python3.10 python3; do
+    if command -v "${cand}" >/dev/null 2>&1; then
+      echo "${cand}"
+      return 0
+    fi
+  done
+  return 1
 }
 
-# --- Directories --------------------------------------------------------------
-create_base_dirs() {
-  log "Creating base directories"
-  install -d -m 0755 "$LLM_ROOT" "$VLLM_DIR" "$APP_DIR" "$APP_BIN" "$APP_STATE"
-}
-
-verify_models_present() {
-  if [[ -d "$MODELS_DIR" ]] && find "$MODELS_DIR" -mindepth 1 -maxdepth 3 -type d | head -n 1 >/dev/null 2>&1; then
-    log "Models present under $MODELS_DIR"
-  else
-    warn "No models detected under $MODELS_DIR (installer will continue, but services may fail)"
-  fi
-}
-
-# --- vLLM install -------------------------------------------------------------
-install_vllm() {
-  log "Installing vLLM into ${VLLM_VENV}"
-
-  # Create venv if missing
-  if [[ ! -x "${VLLM_VENV}/bin/python" ]]; then
-    python3 -m venv "${VLLM_VENV}"
+ensure_vllm_installed() {
+  if [[ "${SKIP_VLLM_INSTALL:-0}" == "1" ]]; then
+    warn "SKIP_VLLM_INSTALL=1 set; not installing vLLM. vllm.service may not start."
+    return 0
   fi
 
-  "${VLLM_VENV}/bin/python" -m pip install -U pip wheel setuptools >/dev/null
+  if [[ -x "${VLLM_DIR}/.venv/bin/vllm" ]]; then
+    log "vLLM already installed: ${VLLM_DIR}/.venv/bin/vllm"
+    return 0
+  fi
 
-  # Install vllm (this can take time)
-  "${VLLM_VENV}/bin/python" -m pip install -U vllm
+  log "Installing vLLM into ${VLLM_DIR}/.venv"
+  install -d -m 0755 "${VLLM_DIR}" "${HF_CACHE_DIR}"
+  chown -R vllm:vllm "${VLLM_DIR}" "${HF_CACHE_DIR}"
 
+  local py
+  py="$(detect_python_for_vllm)" || die "No python3 interpreter found."
+
+  sudo -u vllm "${py}" -m venv "${VLLM_DIR}/.venv"
+  sudo -u vllm "${VLLM_DIR}/.venv/bin/python" -m pip install --upgrade pip wheel >/dev/null
+  sudo -u vllm "${VLLM_DIR}/.venv/bin/pip" install --upgrade "vllm" >/dev/null
+
+  [[ -x "${VLLM_DIR}/.venv/bin/vllm" ]] || die "vLLM install completed but CLI missing."
   log "vLLM installed successfully."
 }
 
-# --- App deploy ---------------------------------------------------------------
-deploy_app_code() {
+deploy_app() {
   local repo_root="$1"
-
   log "Deploying application code to ${APP_DIR}"
 
-  # NOTE: Repo layout does NOT contain "app/". App lives at repo root (rag_gateway/, pyproject.toml, etc).
-  # Exclude installer artifacts and local envs.
-  rsync -a --delete \
-    --exclude '.git/' \
-    --exclude '.venv/' \
-    --exclude '__pycache__/' \
-    --exclude 'systemd/' \
-    --exclude 'systemd-dropins/' \
-    --exclude 'scripts/' \
-    --exclude '*.tar.gz' \
-    --exclude 'install.sh' \
-    --exclude 'uninstall.sh' \
-    "${repo_root}/" \
-    "${APP_DIR}/"
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a --delete \
+      --exclude ".venv/" \
+      --exclude "var/" \
+      --exclude "bin/" \
+      --exclude "etc/" \
+      --exclude "systemd/" \
+      --exclude "scripts/" \
+      --exclude ".git/" \
+      "${repo_root}/" "${APP_DIR}/"
+  else
+    warn "rsync not found; falling back to cp -a (no deletion of removed files)"
+    cp -a "${repo_root}/." "${APP_DIR}/"
+    rm -rf "${APP_DIR}/etc" "${APP_DIR}/systemd" "${APP_DIR}/scripts" "${APP_DIR}/.git" 2>/dev/null || true
+  fi
+
+  chown -R rag:rag "${APP_DIR}"
 }
 
 deploy_runtime_helpers() {
   local repo_root="$1"
-
-  log "Deploying runtime helper scripts to ${APP_BIN}"
-  install -d -m 0755 "${APP_BIN}"
-
-  if [[ -d "${repo_root}/scripts" ]]; then
-    rsync -a --delete "${repo_root}/scripts/" "${APP_BIN}/"
-    chmod -R 0755 "${APP_BIN}"
-  else
-    warn "No scripts/ directory found in repo; skipping helper deploy"
-  fi
+  log "Deploying runtime helper scripts to ${APP_BIN_DIR}"
+  install -d -m 0755 "${APP_BIN_DIR}"
+  install -m 0755 "${repo_root}/scripts/wait-http.sh" "${APP_BIN_DIR}/wait-http.sh"
+  chown root:root "${APP_BIN_DIR}/wait-http.sh"
+  chmod 0755 "${APP_BIN_DIR}/wait-http.sh"
 }
 
-ensure_app_venv() {
-  log "Ensuring Python virtualenv exists at ${APP_VENV}"
-  if [[ ! -x "${APP_VENV}/bin/python" ]]; then
-    python3 -m venv "${APP_VENV}"
+setup_gateway_venv() {
+  log "Ensuring Python virtualenv exists at ${APP_DIR}/.venv"
+  if [[ ! -x "${APP_DIR}/.venv/bin/python" ]]; then
+    python3 -m venv "${APP_DIR}/.venv"
+    chown -R rag:rag "${APP_DIR}/.venv"
   fi
-  "${APP_VENV}/bin/python" -m pip install -U pip wheel setuptools >/dev/null
-}
 
-install_gateway_deps() {
   log "Installing/updating gateway Python dependencies"
-  if [[ -f "${APP_DIR}/pyproject.toml" ]]; then
-    "${APP_VENV}/bin/python" -m pip install -U "${APP_DIR}"
-  elif [[ -f "${APP_DIR}/requirements.txt" ]]; then
-    "${APP_VENV}/bin/python" -m pip install -U -r "${APP_DIR}/requirements.txt"
-  else
-    die "No pyproject.toml or requirements.txt found under ${APP_DIR}"
-  fi
+  sudo -u rag "${APP_DIR}/.venv/bin/python" -m pip install --upgrade pip wheel >/dev/null
+  sudo -u rag "${APP_DIR}/.venv/bin/python" -m pip install -e "${APP_DIR}" >/dev/null
 }
 
-create_runtime_state_dirs() {
+ensure_rag_state_dirs() {
   log "Creating rag-gateway runtime state directories"
-  install -d -m 0755 "${APP_STATE}"
-  install -d -m 0755 "${APP_STATE}/logs" "${APP_STATE}/data" || true
+  install -d -m 0755 "${VAR_DIR}" "${TANTIVY_DIR}" "${SCHED_DIR}"
+  chown -R rag:rag "${VAR_DIR}"
 }
 
-deploy_config() {
+backup_if_exists() {
+  local path="$1"
+  if [[ -e "${path}" ]]; then
+    local bak="${path}.$(timestamp).bak"
+    cp -a "${path}" "${bak}"
+    log "Backed up ${path} -> ${bak}"
+  fi
+}
+
+deploy_configs() {
   local repo_root="$1"
-  log "Deploying config files to ${CONFIG_DIR}"
-  install -d -m 0755 "${CONFIG_DIR}"
 
-  if [[ -d "${repo_root}/config" ]]; then
-    rsync -a --delete "${repo_root}/config/" "${CONFIG_DIR}/"
-  elif [[ -f "${repo_root}/config.yaml" ]]; then
-    install -m 0644 "${repo_root}/config.yaml" "${CONFIG_DIR}/config.yaml"
+  log "Deploying config files to ${CONF_DIR}"
+  install -d -m 0755 "${CONF_DIR}"
+
+  if [[ ! -f "${CONF_DIR}/config.yaml" ]]; then
+    install -m 0640 -o root -g rag "${repo_root}/etc/config.yaml" "${CONF_DIR}/config.yaml"
   else
-    warn "No config directory or config.yaml found in repo; leaving ${CONFIG_DIR} as-is"
+    backup_if_exists "${CONF_DIR}/config.yaml"
   fi
 
-  if [[ -f "${CONFIG_DIR}/config.yaml" ]]; then
-    log "Patching ${CONFIG_DIR}/config.yaml paths for this filesystem layout"
-    # Safe, best-effort path patching (only if keys exist)
-    sed -i \
-      -e "s|/opt/llm/models|${MODELS_DIR}|g" \
-      -e "s|/etc/rag-gateway|${CONFIG_DIR}|g" \
-      "${CONFIG_DIR}/config.yaml" || true
+  if [[ ! -f "${CONF_DIR}/sources.yaml" ]]; then
+    install -m 0640 -o root -g rag "${repo_root}/etc/sources.yaml" "${CONF_DIR}/sources.yaml"
+  else
+    log "Keeping existing ${CONF_DIR}/sources.yaml (not overwritten)"
   fi
+
+  log "Patching ${CONF_DIR}/config.yaml paths for this filesystem layout"
+  python3 - <<PY
+from pathlib import Path
+import yaml
+
+p = Path("${CONF_DIR}/config.yaml")
+raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+
+raw.setdefault("paths", {})
+raw["paths"]["tantivy_index_dir"] = "${TANTIVY_DIR}"
+
+raw.setdefault("scheduler", {})
+raw["scheduler"]["state_dir"] = "${SCHED_DIR}"
+raw["scheduler"]["lock_file"] = "${SCHED_LOCK}"
+raw["scheduler"]["sources_file"] = "${CONF_DIR}/sources.yaml"
+
+p.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+PY
+
+  chown root:rag "${CONF_DIR}/config.yaml"
+  chmod 0640 "${CONF_DIR}/config.yaml"
 }
 
 deploy_systemd_units() {
   local repo_root="$1"
+
   log "Deploying systemd units to ${SYSTEMD_DIR}"
+  install -d -m 0755 "${SYSTEMD_DIR}"
 
-  if [[ ! -d "${repo_root}/systemd" ]]; then
-    die "Expected ${repo_root}/systemd directory not found"
-  fi
-
-  local f
-  for f in "${repo_root}/systemd/"*.service "${repo_root}/systemd/"*.target "${repo_root}/systemd/"*.timer; do
-    [[ -e "$f" ]] || continue
-    local base
-    base="$(basename "$f")"
-
-    if [[ -f "${SYSTEMD_DIR}/${base}" ]]; then
-      local bak="${SYSTEMD_DIR}/${base}.$(date +%Y%m%d-%H%M%S).bak"
-      cp -a "${SYSTEMD_DIR}/${base}" "$bak"
-      log "Backed up ${SYSTEMD_DIR}/${base} -> ${bak}"
+  local unit
+  for unit in "${repo_root}/systemd/"*.service "${repo_root}/systemd/"*.timer "${repo_root}/systemd/"*.target; do
+    [[ -e "${unit}" ]] || continue
+    local dst="${SYSTEMD_DIR}/$(basename "${unit}")"
+    if [[ -f "${dst}" ]]; then
+      backup_if_exists "${dst}"
     fi
-
-    install -m 0644 "$f" "${SYSTEMD_DIR}/${base}"
+    install -m 0644 "${unit}" "${dst}"
   done
 
-  systemctl daemon-reload
-}
-
-deploy_systemd_dropins() {
-  local repo_root="$1"
-
-  if [[ -d "${repo_root}/systemd-dropins" ]]; then
+  if [[ -d "${repo_root}/systemd/overrides" ]]; then
     log "Deploying systemd drop-in overrides"
-    rsync -a --delete "${repo_root}/systemd-dropins/" "${SYSTEMD_DIR}/"
-    systemctl daemon-reload
-  else
-    log "No systemd drop-in overrides found (systemd-dropins/); skipping"
+    (cd "${repo_root}/systemd/overrides" && find . -type f -name "*.conf" -print0) | \
+      while IFS= read -r -d '' f; do
+        local rel="${f#./}"
+        local dst_dir="${SYSTEMD_DIR}/$(dirname "${rel}")"
+        install -d -m 0755 "${dst_dir}"
+        install -m 0644 "${repo_root}/systemd/overrides/${rel}" "${SYSTEMD_DIR}/${rel}"
+      done
   fi
-}
 
-patch_unit_files_for_models() {
-  # Patch installed unit files to use /opt/llm/models instead of older baked-in paths.
   log "Patching unit files to use ${MODELS_DIR} for model locations"
-
-  local units=(
-    "${SYSTEMD_DIR}/vllm.service"
-    "${SYSTEMD_DIR}/tei-embed.service"
-    "${SYSTEMD_DIR}/tei-rerank.service"
-  )
-
-  local u
-  for u in "${units[@]}"; do
-    [[ -f "$u" ]] || continue
-    sed -i \
-      -e "s|/opt/llm/models|${MODELS_DIR}|g" \
-      -e "s|/opt/llm/vllm/models|${MODELS_DIR}|g" \
-      -e "s|/opt/llm/tei/models|${MODELS_DIR}|g" \
-      "$u" || true
-  done
+  sed -i \
+    -e 's|--model-id /opt/llm/tei/models/Qwen3-Embedding-8B|--model-id /opt/llm/models/embeddings/Qwen3-Embedding-8B|g' \
+    "${SYSTEMD_DIR}/tei-embed.service" 2>/dev/null || true
+  sed -i \
+    -e 's|--model-id /opt/llm/tei/models/bge-reranker-large|--model-id /opt/llm/models/rerank/bge-reranker-large|g' \
+    "${SYSTEMD_DIR}/tei-rerank.service" 2>/dev/null || true
+  sed -i \
+    -e 's|--model /opt/llm/vllm/models/DeepSeek-R1-Distill-Qwen-32B|--model /opt/llm/models/generator/DeepSeek-R1-Distill-Qwen-32B|g' \
+    "${SYSTEMD_DIR}/vllm.service" 2>/dev/null || true
 
   systemctl daemon-reload
 }
 
 fix_permissions() {
   log "Setting ownership/permissions"
-  # App runtime
-  chown -R rag:rag "${APP_DIR}" || true
-  chmod -R u=rwX,g=rX,o=rX "${APP_DIR}" || true
 
-  # vLLM runtime
-  chown -R vllm:vllm "${VLLM_DIR}" || true
-  chmod -R u=rwX,g=rX,o=rX "${VLLM_DIR}" || true
+  chown -R rag:rag "${APP_DIR}"
+  chmod -R u+rwX,go+rX "${APP_DIR}"
 
-  # Config
-  chown -R rag:rag "${CONFIG_DIR}" || true
-  chmod -R u=rwX,g=rX,o=rX "${CONFIG_DIR}" || true
+  chown -R root:rag "${CONF_DIR}"
+  chmod 0755 "${CONF_DIR}"
+  chmod 0640 "${CONF_DIR}/config.yaml" 2>/dev/null || true
+  chmod 0640 "${CONF_DIR}/sources.yaml" 2>/dev/null || true
 
-  # Models should typically remain root-owned or shared read-only; do not chown recursively here.
+  chown -R qdrant:qdrant "${QDRANT_DIR}" || true
+  chown -R tei:tei "${TEI_DIR}" || true
+  chown -R vllm:vllm "${VLLM_DIR}" "${HF_CACHE_DIR}" || true
+
+  chmod -R a+rX "${MODELS_DIR}"
 }
 
 enable_start_stack() {
-  log "Enabling rag-stack.target"
-  systemctl enable rag-stack.target >/dev/null
+  log "Enabling ${STACK_TARGET}"
+  systemctl daemon-reload
+  systemctl enable "${STACK_TARGET}"
 
-  log "Starting rag-stack.target (non-blocking)"
-  systemctl start rag-stack.target --no-block
+  log "Starting ${STACK_TARGET} (non-blocking)"
+  systemctl start --no-block "${STACK_TARGET}"
 
   systemctl list-jobs --no-pager || true
 }
 
-wait_for_unit_active() {
-  local unit="$1"
-  local timeout="$2"
-  local waited=0
-
-  while (( waited < timeout )); do
-    local state sub
-    state="$(systemctl show "$unit" -p ActiveState --value 2>/dev/null || echo "unknown")"
-    sub="$(systemctl show "$unit" -p SubState --value 2>/dev/null || echo "unknown")"
-
-    if [[ "$state" == "active" ]]; then
-      log "OK: ${unit} is active"
-      return 0
-    fi
-
-    log "Waiting for ${unit} (${state} ${sub} )... ${waited}/${timeout}s"
-    sleep 10
-    waited=$((waited + 10))
-  done
-
-  warn "NOT ACTIVE after ${timeout}s: ${unit}"
-  systemctl status "$unit" --no-pager || true
-  return 1
-}
-
-verify_stack() {
-  log "Verifying stack units are active"
-
-  local ok=0
-  systemctl is-active --quiet qdrant.service && log "OK: qdrant.service is active" || ok=1
-  systemctl is-active --quiet tei-embed.service && log "OK: tei-embed.service is active" || ok=1
-  systemctl is-active --quiet tei-rerank.service && log "OK: tei-rerank.service is active" || ok=1
-  systemctl is-active --quiet vllm.service && log "OK: vllm.service is active" || ok=1
-
-  # rag-gateway can take time; wait bounded.
-  wait_for_unit_active rag-gateway.service 600 || ok=1
-
-  # rag-crawl.timer is optional but expected by your target; keep bounded.
-  wait_for_unit_active rag-crawl.timer 60 || ok=1
-
-  if (( ok != 0 )); then
-    warn "Showing failed units (if any):"
-    systemctl --failed --no-pager || true
-    die "Stack verification failed."
-  fi
-
-  log "Stack verification OK."
-}
+## NOTE:
+## Install-time verification/wait loops were intentionally removed.
+## Readiness gating and startup ordering must be enforced by systemd unit
+## dependencies and/or ExecStartPre helpers, not by install.sh.
 
 main() {
-  require_root
-  require_cmds
-
+  need_root
   local repo_root
   repo_root="$(detect_repo_root)"
   log "Repo root detected: ${repo_root}"
 
-  create_users
-  create_base_dirs
-  verify_models_present
+  # Ensure service accounts exist before we install/deploy anything else.
+  ensure_group_user rag
+  ensure_group_user qdrant
+  ensure_group_user tei
+  ensure_group_user vllm
 
-  install_vllm
+  # Hard validation: if these do not exist, systemd will fail with 217/USER.
+  assert_system_user rag
+  assert_system_user qdrant
+  assert_system_user tei
+  assert_system_user vllm
 
-  deploy_app_code "$repo_root"
-  deploy_runtime_helpers "$repo_root"
+  ensure_base_dirs
+  ensure_models_present "${repo_root}"
+  ensure_vllm_installed
 
-  ensure_app_venv
-  install_gateway_deps
-
-  create_runtime_state_dirs
-  deploy_config "$repo_root"
-
-  deploy_systemd_units "$repo_root"
-  deploy_systemd_dropins "$repo_root"
-  patch_unit_files_for_models
+  deploy_app "${repo_root}"
+  deploy_runtime_helpers "${repo_root}"
+  setup_gateway_venv
+  ensure_rag_state_dirs
+  deploy_configs "${repo_root}"
+  deploy_systemd_units "${repo_root}"
   fix_permissions
 
   enable_start_stack
-  verify_stack
+
+  log "Install complete."
+  log "Systemd is responsible for readiness gating and startup ordering."
+  log "To verify: systemctl status ${STACK_TARGET} rag-gateway.service"
+  log "Logs: journalctl -u rag-gateway.service -b --no-pager"
 }
 
 main "$@"
