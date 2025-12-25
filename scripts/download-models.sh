@@ -12,7 +12,7 @@ set -euo pipefail
 # Notes:
 # - Uses huggingface_hub snapshot_download (HTTP). No git-lfs required.
 # - Creates a dedicated venv under /opt/llm/model-tools/.venv to avoid polluting system python.
-# - Safe to re-run; it resumes and skips unchanged files.
+# - Safe to re-run; snapshot_download resumes whenever possible and skips unchanged files.
 
 MODELS_DIR="/opt/llm/models"
 TOOLS_DIR="/opt/llm/model-tools"
@@ -46,12 +46,10 @@ ensure_prereqs() {
   log "Ensuring prerequisites"
   command -v python3 >/dev/null 2>&1 || die "python3 is required"
 
-  # Create base directories
   install -d -m 0755 /opt/llm
   install -d -m 0755 "${MODELS_DIR}"
   install -d -m 0755 "${TOOLS_DIR}"
 
-  # venv
   if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
     log "Creating venv: ${VENV_DIR}"
     python3 -m venv "${VENV_DIR}"
@@ -69,33 +67,24 @@ download_one() {
   log "Downloading ${repo_id} -> ${dest_dir}"
   install -d -m 0755 "${dest_dir}"
 
-  # Optional token: use env var HF_TOKEN if set
-  # If you want hf_transfer acceleration, you can also:
-  #   pip install hf_transfer
-  #   export HF_HUB_ENABLE_HF_TRANSFER=1
-  HF_TOKEN_ENV="${HF_TOKEN:-}"
-
   "${VENV_DIR}/bin/python" - <<PY
 import os
 from huggingface_hub import snapshot_download
 
 repo_id = "${repo_id}"
 local_dir = "${dest_dir}"
-
 token = os.environ.get("HF_TOKEN") or None
 
+# NOTE: do not pass deprecated args like resume_download/local_dir_use_symlinks.
 snapshot_download(
     repo_id=repo_id,
     local_dir=local_dir,
-    local_dir_use_symlinks=False,  # keep a real copy under /opt/llm/models
     token=token,
-    resume_download=True,
     max_workers=8,
 )
 print(f"OK: {repo_id} -> {local_dir}")
 PY
 
-  # Make readable for service users
   chmod -R a+rX "${dest_dir}"
 }
 
