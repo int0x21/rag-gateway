@@ -247,5 +247,30 @@ enable_start_basics() {
 
 main() {
   need_root
-  local repo_ro_
+  local repo_root
+  repo_root="$(detect_repo_root)"
+
+  log "Repo root detected: ${repo_root}"
+
+  ensure_group_user rag
+  ensure_group_user qdrant
+  ensure_group_user tei
+  ensure_group_user vllm
+
+  ensure_base_dirs
+  deploy_app "${repo_root}"
+  setup_gateway_venv
+  ensure_rag_state_dirs
+  deploy_configs "${repo_root}"
+  deploy_systemd_units "${repo_root}"
+  fix_permissions
+  enable_start_basics
+
+  log "Install complete."
+  log "Gateway config: ${CONF_DIR}/config.yaml"
+  log "Gateway unit:   systemctl status rag-gateway.service"
+  log "Crawl timer:    systemctl status rag-crawl.timer"
+}
+
+main "$@"
 
