@@ -233,6 +233,10 @@ deploy_configs() {
   local repo_root="$1"
 
   log "Deploying config files to ${CONF_DIR}"
+  if [[ -f "${CONF_DIR}/config.yaml" ]]; then
+    log "Renaming old config.yaml -> api.yaml"
+    mv "${CONF_DIR}/config.yaml" "${CONF_DIR}/api.yaml"
+  fi
   install -d -m 0755 "${CONF_DIR}"
 
   if [[ ! -f "${CONF_DIR}/api.yaml" ]]; then
