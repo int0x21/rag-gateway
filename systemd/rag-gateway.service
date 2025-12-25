@@ -12,16 +12,13 @@ WorkingDirectory=/opt/llm/rag-gateway
 
 Environment=RAG_GATEWAY_CONFIG=/etc/rag-gateway/config.yaml
 
-# Readiness gating (order ≠ readiness):
-# Wait for qdrant + TEI embed + TEI rerank (+ optional vLLM) to actually accept connections.
-# Uses endpoints we already know your gateway hits.
-ExecStartPre=/usr/bin/bash -lc 'set -euo pipefail; for i in {1..180}; do curl -fsS http://127.0.0.1:6333/collections >/dev/null && exit 0 || true; sleep 1; done; echo "qdrant not ready" >&2; exit 1'
-ExecStartPre=/usr/bin/bash -lc 'set -euo pipefail; for i in {1..300}; do curl -fsS -X POST http://127.0.0.1:8081/v1/embeddings -H "Content-Type: application/json" -d "{\"model\":\"Qwen/Qwen3-Embedding-8B\",\"input\":\"ready\"}" >/dev/null && exit 0 || true; sleep 1; done; echo "tei-embed not ready" >&2; exit 1'
-ExecStartPre=/usr/bin/bash -lc 'set -euo pipefail; for i in {1..300}; do curl -fsS -X POST http://127.0.0.1:8082/v1/rerank -H "Content-Type: application/json" -d "{\"model\":\"BAAI/bge-reranker-large\",\"query\":\"ready\",\"documents\":[\"ready\"]}" >/dev/null && exit 0 || true; sleep 1; done; echo "tei-rerank not ready" >&2; exit 1'
+# Readiness gating (order != readiness). Use helper script installed by install.sh.
+ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name qdrant --url http://127.0.0.1:6333/collections --method GET --timeout 180
+ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name tei-embed --url http://127.0.0.1:8081/v1/embeddings --method POST --json {"model":"Qwen/Qwen3-Embedding-8B","input":"ready"} --timeout 600
+ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name tei-rerank --url http://127.0.0.1:8082/v1/rerank --method POST --json {"model":"BAAI/bge-reranker-large","query":"ready","documents":["ready"]} --timeout 600
 
-# Optional: only enable this if your vLLM endpoint is on 8000 (common default).
-# If your vLLM port differs, adjust the URL or remove this line.
-ExecStartPre=/usr/bin/bash -lc 'set -euo pipefail; for i in {1..600}; do curl -fsS http://127.0.0.1:8000/v1/models >/dev/null && exit 0 || true; sleep 1; done; echo "vllm not ready" >&2; exit 1'
+# Optional vLLM readiness gate (keep if your vLLM listens on 8000)
+ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name vllm --url http://127.0.0.1:8000/v1/models --method GET --timeout 900
 
 ExecStart=/opt/llm/rag-gateway/.venv/bin/uvicorn rag_gateway.app:app --host 127.0.0.1 --port 9000
 

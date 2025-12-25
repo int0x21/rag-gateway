@@ -12,6 +12,8 @@ TEI_CACHE_DIR="/opt/llm/tei/cache"
 VLLM_DIR="/opt/llm/vllm"
 HF_CACHE_DIR="/opt/llm/hf"
 
+APP_BIN_DIR="${APP_DIR}/bin"
+
 VAR_DIR="${APP_DIR}/var"
 TANTIVY_DIR="${VAR_DIR}/tantivy"
 SCHED_DIR="${VAR_DIR}/scheduler"
@@ -45,12 +47,10 @@ need_root() {
 detect_repo_root() {
   local script_dir
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
   if [[ -f "${script_dir}/pyproject.toml" && -d "${script_dir}/rag_gateway" && -d "${script_dir}/systemd" && -d "${script_dir}/etc" ]]; then
     echo "${script_dir}"
     return 0
   fi
-
   die "Could not detect repo root. Expected pyproject.toml + rag_gateway/ + etc/ + systemd/ next to install.sh."
 }
 
@@ -66,19 +66,14 @@ ensure_group_user() {
 
   if ! id -u "${name}" >/dev/null 2>&1; then
     log "Creating system user: ${name}"
-    useradd --system \
-      --gid "${name}" \
-      --home-dir "${home}" \
-      --shell "${shell}" \
-      --no-create-home \
-      "${name}"
+    useradd --system --gid "${name}" --home-dir "${home}" --shell "${shell}" --no-create-home "${name}"
   fi
 }
 
 ensure_base_dirs() {
   log "Creating base directories"
   install -d -m 0755 /opt/llm
-  install -d -m 0755 "${APP_DIR}"
+  install -d -m 0755 "${APP_DIR}" "${APP_BIN_DIR}"
   install -d -m 0755 "${CONF_DIR}"
   install -d -m 0755 "${MODELS_DIR}"
 
@@ -114,7 +109,6 @@ ensure_models_present() {
   [[ -d "${GENERATOR_DIR}" ]] || die "Generator model still missing: ${GENERATOR_DIR}"
   [[ -d "${EMBED_DIR}" ]] || die "Embedding model still missing: ${EMBED_DIR}"
   [[ -d "${RERANK_DIR}" ]] || die "Rerank model still missing: ${RERANK_DIR}"
-
   log "Model download complete and verified."
 }
 
@@ -141,37 +135,29 @@ ensure_vllm_installed() {
   fi
 
   log "Installing vLLM into ${VLLM_DIR}/.venv"
-
-  # Ensure directories exist AND are writable by vllm user before creating venv
-  install -d -m 0755 "${VLLM_DIR}"
-  install -d -m 0755 "${HF_CACHE_DIR}"
+  install -d -m 0755 "${VLLM_DIR}" "${HF_CACHE_DIR}"
   chown -R vllm:vllm "${VLLM_DIR}" "${HF_CACHE_DIR}"
 
   local py
-  py="$(detect_python_for_vllm)" || die "No python3 interpreter found (need python3 / python3.11 recommended)."
+  py="$(detect_python_for_vllm)" || die "No python3 interpreter found."
 
-  # Create venv as vllm user
   sudo -u vllm "${py}" -m venv "${VLLM_DIR}/.venv"
-
-  # Install dependencies as vllm user
   sudo -u vllm "${VLLM_DIR}/.venv/bin/python" -m pip install --upgrade pip wheel >/dev/null
+  sudo -u vllm "${VLLM_DIR}/.venv/bin/pip" install --upgrade "vllm" >/dev/null
 
-  if ! sudo -u vllm "${VLLM_DIR}/.venv/bin/pip" install --upgrade "vllm"; then
-    die "Failed to install vLLM. Common causes: incompatible Python version, missing CUDA/driver/toolchain, or unsupported platform."
-  fi
-
-  [[ -x "${VLLM_DIR}/.venv/bin/vllm" ]] || die "vLLM install completed but CLI missing: ${VLLM_DIR}/.venv/bin/vllm"
+  [[ -x "${VLLM_DIR}/.venv/bin/vllm" ]] || die "vLLM install completed but CLI missing."
   log "vLLM installed successfully."
 }
 
 deploy_app() {
   local repo_root="$1"
-
   log "Deploying application code to ${APP_DIR}"
+
   if command -v rsync >/dev/null 2>&1; then
     rsync -a --delete \
       --exclude ".venv/" \
       --exclude "var/" \
+      --exclude "bin/" \
       --exclude "etc/" \
       --exclude "systemd/" \
       --exclude "scripts/" \
@@ -184,6 +170,18 @@ deploy_app() {
   fi
 
   chown -R rag:rag "${APP_DIR}"
+}
+
+deploy_runtime_helpers() {
+  local repo_root="$1"
+  log "Deploying runtime helper scripts to ${APP_BIN_DIR}"
+
+  install -d -m 0755 "${APP_BIN_DIR}"
+
+  install -m 0755 "${repo_root}/scripts/wait-http.sh" "${APP_BIN_DIR}/wait-http.sh"
+
+  chown root:root "${APP_BIN_DIR}/wait-http.sh"
+  chmod 0755 "${APP_BIN_DIR}/wait-http.sh"
 }
 
 setup_gateway_venv() {
@@ -235,12 +233,7 @@ deploy_configs() {
   python3 - <<PY
 import sys
 from pathlib import Path
-
-try:
-    import yaml
-except Exception as e:
-    print(f"ERROR: PyYAML is required to patch config.yaml: {e}", file=sys.stderr)
-    sys.exit(1)
+import yaml
 
 p = Path("${CONF_DIR}/config.yaml")
 raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
@@ -288,15 +281,12 @@ deploy_systemd_units() {
   fi
 
   log "Patching unit files to use ${MODELS_DIR} for model locations"
-
   sed -i \
     -e 's|--model-id /opt/llm/tei/models/Qwen3-Embedding-8B|--model-id /opt/llm/models/embeddings/Qwen3-Embedding-8B|g' \
     "${SYSTEMD_DIR}/tei-embed.service" 2>/dev/null || true
-
   sed -i \
     -e 's|--model-id /opt/llm/tei/models/bge-reranker-large|--model-id /opt/llm/models/rerank/bge-reranker-large|g' \
     "${SYSTEMD_DIR}/tei-rerank.service" 2>/dev/null || true
-
   sed -i \
     -e 's|--model /opt/llm/vllm/models/DeepSeek-R1-Distill-Qwen-32B|--model /opt/llm/models/generator/DeepSeek-R1-Distill-Qwen-32B|g' \
     "${SYSTEMD_DIR}/vllm.service" 2>/dev/null || true
@@ -328,8 +318,22 @@ enable_start_stack() {
   systemctl enable --now "${STACK_TARGET}"
 }
 
+wait_unit_active() {
+  local unit="$1"
+  local timeout="$2"
+  local deadline=$(( $(date +%s) + timeout ))
+
+  while (( $(date +%s) < deadline )); do
+    if systemctl is-active --quiet "${unit}"; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 verify_stack_active() {
-  log "Verifying stack units are active"
+  log "Verifying stack units are active (with settle time)"
   local failed=0
 
   for u in "${REQUIRED_UNITS[@]}"; do
@@ -341,7 +345,17 @@ verify_stack_active() {
       continue
     fi
 
-    if systemctl is-active --quiet "${u}"; then
+    # Give slow services time to settle (TEI/vLLM/gateway can take minutes on cold start)
+    local t=60
+    case "${u}" in
+      tei-embed.service|tei-rerank.service) t=900;;
+      vllm.service) t=1200;;
+      rag-gateway.service) t=900;;
+      rag-crawl.timer) t=120;;
+      *) t=120;;
+    esac
+
+    if wait_unit_active "${u}" "${t}"; then
       log "OK: ${u} is active"
       continue
     fi
@@ -365,7 +379,6 @@ main() {
   need_root
   local repo_root
   repo_root="$(detect_repo_root)"
-
   log "Repo root detected: ${repo_root}"
 
   ensure_group_user rag
@@ -375,10 +388,10 @@ main() {
 
   ensure_base_dirs
   ensure_models_present "${repo_root}"
-
   ensure_vllm_installed
 
   deploy_app "${repo_root}"
+  deploy_runtime_helpers "${repo_root}"
   setup_gateway_venv
   ensure_rag_state_dirs
   deploy_configs "${repo_root}"
@@ -389,7 +402,6 @@ main() {
   verify_stack_active
 
   log "Install complete."
-  log "Stack target: systemctl status ${STACK_TARGET} --no-pager"
 }
 
 main "$@"

@@ -1,0 +1,57 @@
+[Unit]
+Description=RAG Gateway Stack (qdrant + TEI + vLLM + rag-gateway)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+
+# Start in strict order; each "systemctl start" blocks until the unit is started.
+ExecStart=/usr/bin/bash -lc '\
+  set -euo pipefail; \
+  echo "[rag-stack] starting qdrant"; \
+  systemctl start qdrant.service; \
+  systemctl is-active --quiet qdrant.service; \
+  echo "[rag-stack] starting tei-embed"; \
+  systemctl start tei-embed.service; \
+  systemctl is-active --quiet tei-embed.service; \
+  echo "[rag-stack] starting tei-rerank"; \
+  systemctl start tei-rerank.service; \
+  systemctl is-active --quiet tei-rerank.service; \
+  echo "[rag-stack] starting vllm"; \
+  systemctl start vllm.service; \
+  systemctl is-active --quiet vllm.service; \
+  echo "[rag-stack] starting rag-gateway"; \
+  systemctl start rag-gateway.service; \
+  systemctl is-active --quiet rag-gateway.service; \
+  echo "[rag-stack] starting rag-crawl.timer"; \
+  systemctl start rag-crawl.timer; \
+  systemctl is-active --quiet rag-crawl.timer; \
+  echo "[rag-stack] all units active"; \
+'
+
+# Stop in reverse order
+ExecStop=/usr/bin/bash -lc '\
+  set -euo pipefail; \
+  echo "[rag-stack] stopping rag-crawl.timer"; \
+  systemctl stop rag-crawl.timer || true; \
+  echo "[rag-stack] stopping rag-gateway"; \
+  systemctl stop rag-gateway.service || true; \
+  echo "[rag-stack] stopping vllm"; \
+  systemctl stop vllm.service || true; \
+  echo "[rag-stack] stopping tei-rerank"; \
+  systemctl stop tei-rerank.service || true; \
+  echo "[rag-stack] stopping tei-embed"; \
+  systemctl stop tei-embed.service || true; \
+  echo "[rag-stack] stopping qdrant"; \
+  systemctl stop qdrant.service || true; \
+  echo "[rag-stack] stack stopped"; \
+'
+
+TimeoutStartSec=15min
+TimeoutStopSec=10min
+
+[Install]
+WantedBy=multi-user.target
+
