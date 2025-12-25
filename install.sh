@@ -40,19 +40,13 @@ detect_repo_root() {
   local script_dir
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-  # Layout A: repo root directly contains pyproject.toml and rag_gateway/
+  # Expect this script to live in the repo root
   if [[ -f "${script_dir}/pyproject.toml" && -d "${script_dir}/rag_gateway" && -d "${script_dir}/systemd" && -d "${script_dir}/etc" ]]; then
     echo "${script_dir}"
     return 0
   fi
 
-  # Layout B: everything is under a nested rag-gateway/ directory
-  if [[ -f "${script_dir}/rag-gateway/pyproject.toml" && -d "${script_dir}/rag-gateway/rag_gateway" && -d "${script_dir}/rag-gateway/systemd" && -d "${script_dir}/rag-gateway/etc" ]]; then
-    echo "${script_dir}/rag-gateway"
-    return 0
-  fi
-
-  die "Could not detect repo root. Expected pyproject.toml + rag_gateway/ + etc/ + systemd/ near this script."
+  die "Could not detect repo root. Expected pyproject.toml + rag_gateway/ + etc/ + systemd/ next to install.sh."
 }
 
 ensure_group_user() {
@@ -76,15 +70,12 @@ ensure_group_user() {
   fi
 }
 
-ensure_dirs() {
-  log "Creating directories"
+ensure_base_dirs() {
+  log "Creating base directories"
   install -d -m 0755 /opt/llm
   install -d -m 0755 "${APP_DIR}"
   install -d -m 0755 "${CONF_DIR}"
   install -d -m 0755 "${MODELS_DIR}"
-
-  # rag-gateway state
-  install -d -m 0755 "${VAR_DIR}" "${TANTIVY_DIR}" "${SCHED_DIR}"
 
   # upstream service dirs (as referenced by unit files)
   install -d -m 0755 "${QDRANT_DIR}" "${QDRANT_DIR}/config"
@@ -103,11 +94,12 @@ deploy_app() {
       --exclude "var/" \
       --exclude "etc/" \
       --exclude "systemd/" \
+      --exclude ".git/" \
       "${repo_root}/" "${APP_DIR}/"
   else
     warn "rsync not found; falling back to cp -a (no deletion of removed files)"
     cp -a "${repo_root}/." "${APP_DIR}/"
-    rm -rf "${APP_DIR}/etc" "${APP_DIR}/systemd" 2>/dev/null || true
+    rm -rf "${APP_DIR}/etc" "${APP_DIR}/systemd" "${APP_DIR}/.git" 2>/dev/null || true
   fi
 
   chown -R rag:rag "${APP_DIR}"
@@ -123,6 +115,13 @@ setup_gateway_venv() {
   log "Installing/updating gateway Python dependencies"
   sudo -u rag "${APP_DIR}/.venv/bin/python" -m pip install --upgrade pip wheel >/dev/null
   sudo -u rag "${APP_DIR}/.venv/bin/python" -m pip install -e "${APP_DIR}" >/dev/null
+}
+
+ensure_rag_state_dirs() {
+  # IMPORTANT: create var/ AFTER pip install -e to avoid setuptools seeing it as a top-level package
+  log "Creating rag-gateway runtime state directories"
+  install -d -m 0755 "${VAR_DIR}" "${TANTIVY_DIR}" "${SCHED_DIR}"
+  chown -R rag:rag "${VAR_DIR}"
 }
 
 backup_if_exists() {
@@ -147,11 +146,10 @@ deploy_configs() {
     backup_if_exists "${CONF_DIR}/config.yaml"
   fi
 
-  # sources.yaml
+  # sources.yaml (typically user-curated; do not overwrite if it exists)
   if [[ ! -f "${CONF_DIR}/sources.yaml" ]]; then
     install -m 0640 -o root -g rag "${repo_root}/etc/sources.yaml" "${CONF_DIR}/sources.yaml"
   else
-    # Do not overwrite sources.yaml by default; it is typically user-curated.
     log "Keeping existing ${CONF_DIR}/sources.yaml (not overwritten)"
   fi
 
@@ -202,7 +200,6 @@ deploy_systemd_units() {
   done
 
   # Patch unit files to reference /opt/llm/models for predownloaded models
-  # (Exact-string substitutions for the defaults shipped in the codemass.)
   log "Patching unit files to use ${MODELS_DIR} for model locations"
 
   sed -i \
@@ -242,59 +239,13 @@ fix_permissions() {
   chmod -R a+rX "${MODELS_DIR}"
 }
 
-maybe_enable_start() {
+enable_start_basics() {
   log "Enabling and starting rag-gateway + rag-crawl.timer"
   systemctl enable --now rag-gateway.service
   systemctl enable --now rag-crawl.timer
-
-  # Optionally enable upstream services if their executables appear present
-  if [[ -x "/usr/local/bin/qdrant" ]]; then
-    log "Enabling and starting qdrant.service"
-    systemctl enable --now qdrant.service
-  else
-    warn "qdrant binary not found at /usr/local/bin/qdrant; installed unit but not enabling qdrant.service"
-  fi
-
-  if [[ -x "/usr/local/bin/text-embeddings-router" ]]; then
-    log "Enabling and starting tei-embed.service and tei-rerank.service"
-    systemctl enable --now tei-embed.service tei-rerank.service
-  else
-    warn "text-embeddings-router not found at /usr/local/bin/text-embeddings-router; installed units but not enabling TEI services"
-  fi
-
-  if [[ -x "${VLLM_DIR}/.venv/bin/vllm" ]]; then
-    log "Enabling and starting vllm.service"
-    systemctl enable --now vllm.service
-  else
-    warn "vLLM not found at ${VLLM_DIR}/.venv/bin/vllm; installed unit but not enabling vllm.service"
-  fi
 }
 
 main() {
   need_root
-  local repo_root
-  repo_root="$(detect_repo_root)"
-
-  log "Repo root detected: ${repo_root}"
-
-  ensure_group_user rag
-  ensure_group_user qdrant
-  ensure_group_user tei
-  ensure_group_user vllm
-
-  ensure_dirs
-  deploy_app "${repo_root}"
-  setup_gateway_venv
-  deploy_configs "${repo_root}"
-  deploy_systemd_units "${repo_root}"
-  fix_permissions
-  maybe_enable_start
-
-  log "Install complete."
-  log "Gateway config: ${CONF_DIR}/config.yaml"
-  log "Gateway unit:   systemctl status rag-gateway.service"
-  log "Crawl timer:    systemctl status rag-crawl.timer"
-}
-
-main "$@"
+  local repo_ro_
 

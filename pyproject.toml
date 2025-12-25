@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "rag-gateway"
 version = "0.1.0"
@@ -13,6 +17,12 @@ dependencies = [
   "beautifulsoup4>=4.12",
   "lxml>=5.2",
 ]
+
+[project.scripts]
+rag-gateway-crawl = "rag_gateway.scheduled_crawl_cli:main"
+
+[tool.setuptools]
+packages = ["rag_gateway"]
 
 [tool.uvicorn]
 factory = false
