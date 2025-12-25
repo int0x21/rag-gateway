@@ -22,6 +22,17 @@ GENERATOR_DIR="${MODELS_DIR}/generator/DeepSeek-R1-Distill-Qwen-32B"
 EMBED_DIR="${MODELS_DIR}/embeddings/Qwen3-Embedding-8B"
 RERANK_DIR="${MODELS_DIR}/rerank/bge-reranker-large"
 
+# Stack entry point and required units
+STACK_TARGET="rag-stack.target"
+REQUIRED_UNITS=(
+  "qdrant.service"
+  "tei-embed.service"
+  "tei-rerank.service"
+  "vllm.service"
+  "rag-gateway.service"
+  "rag-crawl.timer"
+)
+
 timestamp() { date +"%Y%m%d-%H%M%S"; }
 log() { printf '%s\n' "[$(date -Is)] $*"; }
 warn() { printf '%s\n' "[$(date -Is)] WARNING: $*" >&2; }
@@ -102,7 +113,6 @@ ensure_models_present() {
   [[ -x "${dl}" ]] || die "Missing or non-executable: ${dl} (run: chmod +x scripts/download-models.sh)"
   "${dl}"
 
-  # Re-check after download
   [[ -d "${GENERATOR_DIR}" ]] || die "Generator model still missing: ${GENERATOR_DIR}"
   [[ -d "${EMBED_DIR}" ]] || die "Embedding model still missing: ${EMBED_DIR}"
   [[ -d "${RERANK_DIR}" ]] || die "Rerank model still missing: ${RERANK_DIR}"
@@ -120,12 +130,13 @@ deploy_app() {
       --exclude "var/" \
       --exclude "etc/" \
       --exclude "systemd/" \
+      --exclude "scripts/" \
       --exclude ".git/" \
       "${repo_root}/" "${APP_DIR}/"
   else
     warn "rsync not found; falling back to cp -a (no deletion of removed files)"
     cp -a "${repo_root}/." "${APP_DIR}/"
-    rm -rf "${APP_DIR}/etc" "${APP_DIR}/systemd" "${APP_DIR}/.git" 2>/dev/null || true
+    rm -rf "${APP_DIR}/etc" "${APP_DIR}/systemd" "${APP_DIR}/scripts" "${APP_DIR}/.git" 2>/dev/null || true
   fi
 
   chown -R rag:rag "${APP_DIR}"
@@ -267,11 +278,34 @@ fix_permissions() {
   chmod -R a+rX "${MODELS_DIR}"
 }
 
-enable_start_basics() {
-  # If you are using rag-stack.target, you can switch to enabling that here.
-  log "Enabling and starting rag-gateway + rag-crawl.timer"
-  systemctl enable --now rag-gateway.service
-  systemctl enable --now rag-crawl.timer
+enable_start_stack() {
+  # Stack is the single entry point
+  log "Enabling and starting ${STACK_TARGET}"
+  systemctl daemon-reload
+  systemctl enable --now "${STACK_TARGET}"
+}
+
+verify_stack_active() {
+  log "Verifying stack units are active"
+  local failed=0
+
+  for u in "${REQUIRED_UNITS[@]}"; do
+    if systemctl is-active --quiet "${u}"; then
+      log "OK: ${u} is active"
+    else
+      warn "NOT ACTIVE: ${u}"
+      failed=1
+    fi
+  done
+
+  if [[ "${failed}" -ne 0 ]]; then
+    warn "One or more units are not active. Showing failing units:"
+    systemctl --failed || true
+    warn "Tip: check logs for a unit with: journalctl -u <unit> -xe --no-pager"
+    die "Stack verification failed."
+  fi
+
+  log "All required units are active."
 }
 
 main() {
@@ -287,8 +321,6 @@ main() {
   ensure_group_user vllm
 
   ensure_base_dirs
-
-  # New: verify models exist (download if missing)
   ensure_models_present "${repo_root}"
 
   deploy_app "${repo_root}"
@@ -297,12 +329,12 @@ main() {
   deploy_configs "${repo_root}"
   deploy_systemd_units "${repo_root}"
   fix_permissions
-  enable_start_basics
+
+  enable_start_stack
+  verify_stack_active
 
   log "Install complete."
-  log "Gateway config: ${CONF_DIR}/config.yaml"
-  log "Gateway unit:   systemctl status rag-gateway.service"
-  log "Crawl timer:    systemctl status rag-crawl.timer"
+  log "Stack target: systemctl status ${STACK_TARGET} --no-pager"
 }
 
 main "$@"
