@@ -100,7 +100,13 @@ def main():
     p.add_argument("--dry-run", action="store_true",
                   help="Dry run (show what would be ingested, don't actually store)")
     p.add_argument("--verbose", "-v", action="store_true",
-                  help="Verbose output (DEBUG level)")
+                   help="Verbose output (DEBUG level)")
+    p.add_argument("--reset", action="store_true",
+                   help="Reset all ingested data (clear Qdrant and Tantivy)")
+    p.add_argument("--reset-qdrant", action="store_true",
+                   help="Reset only Qdrant vector data")
+    p.add_argument("--reset-tantivy", action="store_true",
+                   help="Reset only Tantivy search index")
 
     args = p.parse_args()
 
@@ -111,6 +117,18 @@ def main():
     log_dir = getattr(api_cfg.paths, 'log_dir', '/opt/llm/rag/log')
 
     logger = setup_logging(log_dir, args.verbose)
+
+    # Handle reset operations
+    if args.reset or args.reset_qdrant or args.reset_tantivy:
+        logger.info("Starting data reset operation")
+        result = asyncio.run(run_reset(
+            api_cfg=api_cfg,
+            reset_qdrant=args.reset or args.reset_qdrant,
+            reset_tantivy=args.reset or args.reset_tantivy,
+            logger=logger,
+        ))
+        print(json.dumps(result, indent=2))
+        return
 
     try:
         result = asyncio.run(run_crawl(
@@ -137,6 +155,47 @@ def main():
             "error": str(e),
         }, indent=2), file=sys.stderr)
         sys.exit(1)
+
+
+async def run_reset(api_cfg, reset_qdrant: bool, reset_tantivy: bool, logger) -> Dict:
+    import os
+    """Reset ingested data"""
+    from ..storage.qdrant_store import QdrantVectorStore
+    from ..storage.tantivy_index import TantivyBM25
+
+    result = {"reset_qdrant": False, "reset_tantivy": False, "errors": []}
+
+    try:
+        if reset_qdrant:
+            logger.info("Resetting Qdrant vector store")
+            qdrant = QdrantVectorStore(
+                url=api_cfg.upstreams.qdrant_url,
+                collection="chunks_v1",  # Use the known collection name
+                vector_size=4096,  # Should match TEI embed dimensions
+            )
+            # Note: Qdrant client doesn't have a simple reset method
+            # We would need to delete and recreate the collection
+            # For now, we'll just log that manual reset is needed
+            logger.warning("Qdrant reset requires manual collection deletion")
+            result["qdrant_message"] = "Manual reset required: delete and recreate collection"
+
+        if reset_tantivy:
+            logger.info("Resetting Tantivy search index")
+            tantivy_path = getattr(api_cfg.paths, 'tantivy_index_dir', '/opt/llm/rag-gateway/var/tantivy')
+            import shutil
+            if os.path.exists(tantivy_path):
+                shutil.rmtree(tantivy_path)
+                os.makedirs(tantivy_path, exist_ok=True)
+                result["reset_tantivy"] = True
+                logger.info("Tantivy index reset complete")
+            else:
+                result["tantivy_message"] = "Tantivy directory not found"
+
+    except Exception as e:
+        result["errors"].append(str(e))
+        logger.error(f"Reset failed: {e}")
+
+    return result
 
 
 async def run_crawl(

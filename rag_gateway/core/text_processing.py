@@ -24,18 +24,25 @@ def redact_text(text: str, patterns: Iterable[str]) -> str:
 
 
 def normalize_whitespace(s: str) -> str:
+    if not s or not isinstance(s, str):
+        return ""
     s = re.sub(r"\r\n?", "\n", s)
     s = re.sub(r"[ \t]+\n", "\n", s)
-    s = re.sub(r"\n{3,}", "\n\n")
+    s = re.sub(r"\n{3,}", "\n\n", s)
     return s.strip()
 
 
 def html_to_text(html: str) -> str:
-    soup = BeautifulSoup(html, "lxml")
-    for tag in soup(["script", "style", "noscript", "header", "footer", "nav"]):
-        tag.decompose()
-    for pre in soup.find_all(["pre", "code"]):
-        code_text = pre.get_text()
-        pre.replace_with(soup.new_string(f"\n\n```text\n{code_text}\n```\n\n"))
-    text = soup.get_text(separator="\n")
-    return normalize_whitespace(text)
+    if not html or not isinstance(html, str):
+        return ""
+    try:
+        soup = BeautifulSoup(html, "lxml")
+        for tag in soup(["script", "style", "noscript", "header", "footer", "nav"]):
+            tag.decompose()
+        for pre in soup.find_all(["pre", "code"]):
+            code_text = pre.get_text()
+            pre.replace_with(soup.new_string(f"\n\n```text\n{code_text}\n```\n\n"))
+        text = soup.get_text(separator="\n")
+        return normalize_whitespace(text)
+    except Exception:
+        return ""

@@ -45,9 +45,17 @@ def crawl_github_repo(spec: IngestDocument, max_files: int, max_file_size_bytes:
         cmd = ["git", "clone", "--depth", "1"]
         if spec.ref:
             cmd += ["--branch", spec.ref]
-        cmd += [spec.repo, repo_dir]
-
-        subprocess.check_call(cmd)
+            subprocess.check_call(cmd)
+        else:
+            # Try main branch first, then master
+            try:
+                subprocess.check_call(cmd + ["--branch", "main", spec.repo, repo_dir])
+            except subprocess.CalledProcessError:
+                try:
+                    subprocess.check_call(cmd + ["--branch", "master", spec.repo, repo_dir])
+                except subprocess.CalledProcessError:
+                    # Fall back to default branch
+                    subprocess.check_call(cmd + [spec.repo, repo_dir])
 
         docs: List[IngestDocument] = []
         count = 0
