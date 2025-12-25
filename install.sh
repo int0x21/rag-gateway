@@ -316,9 +316,15 @@ fix_permissions() {
 }
 
 enable_start_stack() {
-  log "Enabling and starting ${STACK_TARGET}"
+  log "Enabling ${STACK_TARGET}"
   systemctl daemon-reload
-  systemctl enable --now "${STACK_TARGET}"
+  systemctl enable "${STACK_TARGET}"
+
+  log "Starting ${STACK_TARGET} (non-blocking)"
+  systemctl start --no-block "${STACK_TARGET}"
+
+  # Optional: show any queued systemd jobs so the operator sees progress immediately
+  systemctl list-jobs --no-pager || true
 }
 
 wait_unit_active_verbose() {
