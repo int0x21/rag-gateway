@@ -117,28 +117,33 @@ test_post_endpoint() {
 test_chat_completions() {
     local url="$1"
 
-    log "Testing chat completions with RAG..."
-    local payload='{"model": "generator", "messages": [{"role": "user", "content": "What is RAG?"}], "rag": {"mode": "selection"}}'
+    log "Testing chat completions without RAG (mode: off)..."
+    local payload_off='{"model": "generator", "messages": [{"role": "user", "content": "Hello world"}], "rag": {"mode": "off"}}'
 
     if response=$(curl -s -X POST "$url" \
         -H "Content-Type: application/json" \
-        -d "$payload" 2>/dev/null); then
+        -d "$payload_off" 2>/dev/null); then
 
-        # Check if it's valid JSON
+        # Check if it's valid JSON with non-empty content
         if echo "$response" | jq '.choices[0].message.content' >/dev/null 2>&1; then
-            local content=$(echo "$response" | jq -r '.choices[0].message.content' | head -c 100)
-            success "Chat completions returned valid response: ${content}..."
-            return 0
+            local content=$(echo "$response" | jq -r '.choices[0].message.content')
+            if [ -n "$content" ] && [ "$content" != "null" ]; then
+                success "Chat completions (mode: off) returned valid response: ${content:0:100}..."
+                return 0
+            else
+                error "Chat completions (mode: off) returned empty/null content: $content"
+                return 1
+            fi
         elif echo "$response" | jq '.detail' >/dev/null 2>&1; then
             local error_msg=$(echo "$response" | jq -r '.detail')
-            warning "Chat completions returned error (but valid JSON): $error_msg"
+            error "Chat completions (mode: off) returned error: $error_msg"
             return 1
         else
-            error "Chat completions returned invalid response: $response"
+            error "Chat completions (mode: off) returned invalid response: $response"
             return 1
         fi
     else
-        error "Chat completions failed: connection error"
+        error "Chat completions (mode: off) failed: connection error"
         return 1
     fi
 }
