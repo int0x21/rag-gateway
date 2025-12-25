@@ -1,39 +1,43 @@
 [Unit]
 Description=RAG Gateway (FastAPI)
-Wants=network-online.target
 After=network-online.target
+Wants=network-online.target
 
-# Hard dependencies for correct startup ordering
+# These are required dependencies for the gateway to function.
 Requires=qdrant.service tei-embed.service tei-rerank.service vllm.service
 After=qdrant.service tei-embed.service tei-rerank.service vllm.service
 
 [Service]
 Type=simple
-User=llm
-Group=llm
+
+# Must exist as a system user; install.sh is responsible for ensuring this.
+User=rag
+Group=rag
+
+EnvironmentFile=-/etc/rag-gateway/env
 WorkingDirectory=/opt/llm/rag-gateway
 
-Environment=RAG_GATEWAY_CONFIG=/etc/rag-gateway/config.yaml
-Environment=PYTHONUNBUFFERED=1
+# Make sure core services are reachable.
+ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name qdrant --url http://127.0.0.1:6333/collections --method GET --timeout 60
 
-# Readiness gates: block until dependencies respond
-# Qdrant ready
-ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name qdrant --url http://127.0.0.1:6333/collections --method GET --timeout 180
+# TEI readiness: validate the endpoint responds successfully to a trivial request.
+ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name tei-embed --url http://127.0.0.1:8081/v1/embeddings --method POST --json '{"model":"Qwen/Qwen3-Embedding-8B","input":"ready"}' --timeout 120
+ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name tei-rerank --url http://127.0.0.1:8082/v1/rerank --method POST --json '{"model":"Qwen/Qwen3-Reranker-8B","query":"ready","documents":["ready"]}' --timeout 120
 
-# vLLM ready (OpenAI-compatible)
-ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name vllm --url http://127.0.0.1:8000/v1/models --method GET --timeout 600
+# vLLM readiness:
+# - /v1/models must be reachable
+# - and must already list the configured generator model id ("generator")
+ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name vllm --url http://127.0.0.1:8000/v1/models --method GET --expect '"id"[[:space:]]*:[[:space:]]*"generator"' --timeout 120
 
-# TEI Embeddings ready (valid JSON; input as list)
-ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name tei-embed --url http://127.0.0.1:8081/v1/embeddings --method POST --json '{"model":"Qwen/Qwen3-Embedding-8B","input":["ready"]}' --timeout 300
-
-# TEI Rerank ready (valid JSON; schema uses texts array)
-ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name tei-rerank --url http://127.0.0.1:8082/v1/rerank --method POST --json '{"model":"BAAI/bge-reranker-large","query":"ready","texts":["ready"]}' --timeout 300
-
-ExecStart=/opt/llm/rag-gateway/.venv/bin/python -m uvicorn rag_gateway.app:app --host 127.0.0.1 --port 9000
+# Start the gateway.
+ExecStart=/opt/llm/rag-gateway/.venv/bin/python -m rag_gateway.app --config /etc/rag-gateway/config.yaml
 
 Restart=on-failure
 RestartSec=2
-TimeoutStartSec=900
+
+# Keep logs accessible via journalctl
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
