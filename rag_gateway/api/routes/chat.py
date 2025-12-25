@@ -6,8 +6,8 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from ..deps import ConfigDep, RetrievalDep, TEIDep, VLLMDep
-from ..core.models import ChatCompletionsRequest
-from ..core.text_processing import redact_text
+from ...core.models import ChatCompletionsRequest
+from ...core.text_processing import redact_text
 
 router = APIRouter()
 

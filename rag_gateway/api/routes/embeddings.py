@@ -6,7 +6,6 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 
 from ..deps import ConfigDep, TEIDep
-from ..core.models import ChatCompletionsRequest
 
 
 router = APIRouter()
