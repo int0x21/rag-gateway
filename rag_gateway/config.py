@@ -116,6 +116,11 @@ def load_config(path: str) -> AppConfig:
 
     raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
 
+    required_sections = ["server", "paths", "upstreams", "models", "retrieval", "safety", "prompting", "ingest", "chunking", "scheduler"]
+    for section in required_sections:
+        if section not in raw:
+            raise ValueError(f"Config missing required section: {section}")
+
     server = ServerConfig(**raw["server"])
     paths = PathsConfig(**raw["paths"])
     upstreams = Upstreams(**raw["upstreams"])

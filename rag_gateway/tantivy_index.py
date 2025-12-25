@@ -37,6 +37,9 @@ class TantivyBM25:
 
         self.searcher = self.index.searcher()
 
+    def refresh_searcher(self) -> None:
+        self.searcher = self.index.searcher()
+
     def upsert_chunks(self, chunks: List[Dict[str, Any]]) -> None:
         writer = self.index.writer()
         for ch in chunks:

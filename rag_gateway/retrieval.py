@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from .models import EvidenceChunk, RetrievalResult
 from .tantivy_index import TantivyBM25
@@ -22,6 +22,16 @@ class RetrievalDeps:
     bm25: TantivyBM25
     vec: QdrantVectorStore
     tei: TEIClient
+
+
+def _safe_extract(payload_or_stored: Any, key: str) -> str:
+    if isinstance(payload_or_stored, dict):
+        val = payload_or_stored.get(key)
+        if isinstance(val, str):
+            return val
+    elif isinstance(payload_or_stored, list) and len(payload_or_stored) > 0:
+        return str(payload_or_stored[0])
+    return ""
 
 
 def _normalize_rerank(rerank_json: dict, n: int) -> List[Tuple[int, float]]:
@@ -71,9 +81,9 @@ async def retrieve_evidence(
         stored = stored_by_id.get(chunk_id, {})
 
         text = payload.get("text") or ""
-        title = payload.get("title") or ((stored.get("title") or [""])[0] if isinstance(stored.get("title"), list) else "")
-        source = payload.get("source") or ((stored.get("source") or [""])[0] if isinstance(stored.get("source"), list) else "")
-        url_or_path = payload.get("url_or_path") or ((stored.get("url_or_path") or [""])[0] if isinstance(stored.get("url_or_path"), list) else "")
+        title = _safe_extract(payload, "title") or _safe_extract(stored, "title")
+        source = _safe_extract(payload, "source") or _safe_extract(stored, "source")
+        url_or_path = _safe_extract(payload, "url_or_path") or _safe_extract(stored, "url_or_path")
 
         cand_chunks.append(
             EvidenceChunk(

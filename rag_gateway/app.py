@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import logging
 import os
+from collections import defaultdict
+from datetime import datetime, timedelta
 from typing import Any, Dict
 
 from fastapi import FastAPI, HTTPException
@@ -68,14 +70,15 @@ def create_app(cfg: AppConfig) -> FastAPI:
 
     bm25 = TantivyBM25(cfg.paths.tantivy_index_dir)
     tei = TEIClient(
-        cfg.upstreams.tei_embed_url,
-        cfg.upstreams.tei_rerank_url,
-        cfg.models.embed_model,
-        cfg.models.rerank_model,
+        embed_base_url=cfg.upstreams.tei_embed_url,
+        rerank_base_url=cfg.upstreams.tei_rerank_url,
+        embed_model=cfg.models.embed_model,
+        rerank_model=cfg.models.rerank_model,
     )
     vllm = VLLMClient(cfg.upstreams.vllm_url)
 
     state: Dict[str, Any] = {"deps": None}
+    ingest_limiter = defaultdict(list)
 
     @app.on_event("startup")
     async def _startup():
@@ -147,6 +150,12 @@ def create_app(cfg: AppConfig) -> FastAPI:
 
     @app.post("/ingest")
     async def ingest(req: IngestRequest):
+        now = datetime.now()
+        recent = [t for t in ingest_limiter.get("global", []) if now - t < timedelta(minutes=5)]
+        if len(recent) >= 10:
+            raise HTTPException(status_code=429, detail="Too many ingest requests")
+        ingest_limiter["global"] = recent + [now]
+
         if not req.documents and not req.crawl:
             raise HTTPException(status_code=400, detail="Provide either documents or crawl spec")
 
@@ -215,14 +224,16 @@ def create_app(cfg: AppConfig) -> FastAPI:
         mode = infer_mode(req)
         filters = infer_filters(req)
 
+        if cfg.safety.redact:
+            for msg in req.messages:
+                if msg.get("role") == "user" and isinstance(msg.get("content"), str):
+                    msg["content"] = redact_text(msg["content"], cfg.safety.redaction_patterns)
+
         evidence_top_k = cfg.retrieval.evidence_top_k
         if mode in cfg.retrieval.mode_overrides and "evidence_top_k" in cfg.retrieval.mode_overrides[mode]:
             evidence_top_k = int(cfg.retrieval.mode_overrides[mode]["evidence_top_k"])
 
         user_text = last_user_text(req)
-        if cfg.safety.redact:
-            user_text = redact_text(user_text, cfg.safety.redaction_patterns)
-
         retrieval_query = user_text.strip() or "help"
 
         rr = await retrieve_evidence(

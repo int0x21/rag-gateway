@@ -103,9 +103,6 @@ async def run_scheduled_crawl(config_path: str, force: bool = False, dry_run_ove
 
     lock_fd = _acquire_lock(cfg.scheduler.lock_file)
     try:
-        if not force and not _should_run(cfg.scheduler.interval_minutes, cfg.scheduler.state_dir):
-            return {"ran": False, "reason": "not due yet (post-lock)"}
-
         src_doc = _read_sources(cfg.scheduler.sources_file)
         defaults = src_doc.get("defaults") or {}
         default_enabled = bool(defaults.get("enabled", True))

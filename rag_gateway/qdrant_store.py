@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -35,7 +36,8 @@ class QdrantVectorStore:
                         field_name=field,
                         field_schema=qm.PayloadSchemaType.KEYWORD,
                     )
-                except Exception:
+                except Exception as e:
+                    logging.warning(f"Failed to create payload index for {field}: {e}")
                     pass
 
     def get_payloads(self, ids: List[str]) -> Dict[str, Dict[str, Any]]:
