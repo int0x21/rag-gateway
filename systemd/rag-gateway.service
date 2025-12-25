@@ -1,8 +1,7 @@
 [Unit]
 Description=RAG Gateway (FastAPI)
-After=network-online.target qdrant.service tei-embed.service tei-rerank.service vllm.service
 Wants=network-online.target
-Requires=qdrant.service tei-embed.service tei-rerank.service vllm.service
+After=network-online.target
 
 [Service]
 Type=simple
@@ -10,21 +9,26 @@ User=rag
 Group=rag
 WorkingDirectory=/opt/llm/rag-gateway
 
-# Wait for Qdrant
+Environment=PYTHONUNBUFFERED=1
+
+# Ensure core dependencies are reachable before starting the API.
+# Note: ordering/dependency wiring is handled via systemd (rag-stack.target + drop-ins),
+# while readiness is enforced here with ExecStartPre checks.
 ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name qdrant --url http://127.0.0.1:6333/collections --method GET --timeout 60
 
-# Wait for TEI embed (POST) - use bash so JSON is always preserved correctly
-ExecStartPre=/usr/bin/bash -lc '/opt/llm/rag-gateway/bin/wait-http.sh --name tei-embed --url http://127.0.0.1:8081/v1/embeddings --method POST --json "{\"model\":\"Qwen/Qwen3-Embedding-8B\",\"input\":\"ready\"}" --timeout 120'
+# TEI embed: send a small, valid OpenAI embeddings request.
+ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name tei-embed --url http://127.0.0.1:8081/v1/embeddings --method POST --timeout 180 --json '{"model":"Qwen/Qwen3-Embedding-8B","input":"ready"}'
 
-# Wait for vLLM to publish models; we just need to see "generator" in /v1/models
-ExecStartPre=/usr/bin/bash -lc '/opt/llm/rag-gateway/bin/wait-http.sh --name vllm --url http://127.0.0.1:8000/v1/models --method GET --expect "\"id\"[[:space:]]*:[[:space:]]*\"generator\"" --timeout 180'
+# vLLM: do not allow gateway start until vLLM reports at least one loaded model,
+# and specifically until our configured generator model id is present.
+ExecStartPre=/opt/llm/rag-gateway/bin/wait-vllm-models.sh --url http://127.0.0.1:8000/v1/models --timeout 180 --min-models 1 --expect-id generator
 
-Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/llm/rag-gateway/.venv/bin/python -m rag_gateway.main --host 127.0.0.1 --port 9000
+ExecStart=/opt/llm/rag-gateway/.venv/bin/uvicorn rag_gateway.main:app --host 0.0.0.0 --port 8001
 
-Restart=on-failure
+Restart=always
 RestartSec=2
+TimeoutStartSec=300
 
 [Install]
-WantedBy=rag-stack.target
+WantedBy=multi-user.target
 
