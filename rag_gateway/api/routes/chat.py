@@ -42,13 +42,16 @@ async def chat_completions(
 
         retrieval_query = user_text.strip() or "help"
 
-        result = await retrieval.retrieve(
-            query=retrieval_query,
-            filters=filters if filters else None,
-            evidence_top_k=evidence_top_k,
-        )
-
-        evidence_block = build_evidence_block(result["evidence"])
+        # Skip RAG retrieval when mode is "off"
+        if mode == "off":
+            evidence_block = ""
+        else:
+            result = await retrieval.retrieve(
+                query=retrieval_query,
+                filters=filters if filters else None,
+                evidence_top_k=evidence_top_k,
+            )
+            evidence_block = build_evidence_block(result["evidence"])
 
         system = (
             cfg.prompting.system_preamble.strip()
