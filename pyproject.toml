@@ -19,7 +19,8 @@ dependencies = [
 ]
 
 [project.scripts]
-rag-gateway-crawl = "rag_gateway.scheduled_crawl_cli:main"
+ rag-gateway-crawl = "rag_gateway.ingestion.cli:main"
+
 
 [tool.setuptools]
 packages = ["rag_gateway"]

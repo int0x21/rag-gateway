@@ -27,28 +27,24 @@ need_root() {
 PROJECT_UNITS=(
   "rag-stack.target"
   "rag-gateway.service"
-  "rag-crawl.service"
-  "rag-crawl.timer"
   "qdrant.service"
   "tei-embed.service"
   "tei-rerank.service"
   "vllm.service"
 )
 
+
 stop_disable_units() {
   log "Stopping/disabling units (if present)"
   systemctl stop rag-stack.target 2>/dev/null || true
   systemctl disable rag-stack.target 2>/dev/null || true
-
-  # Stop timer explicitly
-  systemctl stop rag-crawl.timer 2>/dev/null || true
-  systemctl disable rag-crawl.timer 2>/dev/null || true
 
   for unit in "${PROJECT_UNITS[@]}"; do
     systemctl stop "${unit}" 2>/dev/null || true
     systemctl disable "${unit}" 2>/dev/null || true
   done
 }
+
 
 remove_units_dropins_and_baks() {
   log "Removing unit files, drop-ins, and .bak backups"
@@ -109,16 +105,23 @@ remove_paths_keep_models() {
   fi
 }
 
+remove_cli_tool() {
+  rm -f "/usr/local/bin/rag-gateway-crawl"
+  log "Removed CLI tool"
+}
+
 main() {
   need_root
   stop_disable_units
   remove_units_dropins_and_baks
   remove_paths_keep_models
+  remove_cli_tool
 
   log "Uninstall complete."
   log "To confirm there are no failed units:"
   log "  systemctl --failed"
 }
+
 
 main "$@"
 

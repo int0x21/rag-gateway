@@ -17,7 +17,8 @@ ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name tei-embed --url http:/
 
 ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name vllm --url http://127.0.0.1:8000/v1/models --method GET --timeout 180
 
-ExecStart=/opt/llm/rag-gateway/.venv/bin/uvicorn rag_gateway.app:app --host 0.0.0.0 --port 9000
+ExecStart=/opt/llm/rag-gateway/.venv/bin/python -m rag_gateway.main
+
 
 Restart=always
 RestartSec=2

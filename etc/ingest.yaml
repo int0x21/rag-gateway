@@ -1,0 +1,29 @@
+# Ingestion CLI settings
+
+# Crawl limits
+http:
+  user_agent: "rag-gateway/0.1 (internal)"
+  max_pages: 2000
+  max_depth: 4
+  request_timeout_s: 30
+  politeness_delay_s: 0.2
+
+github:
+  max_files: 5000
+  max_file_size_bytes: 2000000
+
+# Chunking settings
+chunking:
+  max_chars: 8000
+  overlap_chars: 800
+
+# Batch settings
+batch_size: 64
+incremental: true
+skip_unchanged: true
+
+# Collection
+qdrant_collection: "chunks_v1"
+
+# Preview settings
+preview_items: 10

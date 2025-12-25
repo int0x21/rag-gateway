@@ -7,5 +7,6 @@ We keep this module so unit files can reliably reference:
 The actual FastAPI app is defined in rag_gateway.app.
 """
 
-from .app import app  # noqa: F401
+from .api.app import app  # noqa: F401
+
 

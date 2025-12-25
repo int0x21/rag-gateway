@@ -4,9 +4,9 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from .models import EvidenceChunk, RetrievalResult
-from .tantivy_index import TantivyBM25
-from .qdrant_store import QdrantVectorStore
-from .tei_client import TEIClient
+from ..storage.tantivy_index import TantivyBM25
+from ..storage.qdrant_store import QdrantVectorStore
+from ..storage.tei_client import TEIClient
 
 
 def rrf_fuse(ranked_lists: List[List[str]], k: int = 60) -> Dict[str, float]:
@@ -110,4 +110,3 @@ async def retrieve_evidence(
     reranked = sorted([(cand_chunks[i], s) for i, s in pairs], key=lambda x: x[1], reverse=True)
     top = [c for c, _ in reranked[:evidence_top_k]]
     return RetrievalResult(evidence=top)
-

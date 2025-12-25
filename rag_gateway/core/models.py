@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pydantic import BaseModel, Field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class RagParams(BaseModel):
@@ -77,3 +78,31 @@ class IngestRequest(BaseModel):
     default_source_type: Optional[str] = None
 
     dry_run: Optional[bool] = False
+
+
+@dataclass
+class ChunkRecord:
+    chunk_id: str
+    chunk_hash: str
+    doc_id: str
+    title: str
+    source_type: str
+    url_or_path: str
+    vendor: Optional[str]
+    product: Optional[str]
+    version: Optional[str]
+    text: str
+
+
+@dataclass
+class TantivyHit:
+    chunk_id: str
+    score: float
+    stored: Dict[str, Any]
+
+
+@dataclass
+class QdrantHit:
+    chunk_id: str
+    score: float
+    payload: Dict[str, Any]

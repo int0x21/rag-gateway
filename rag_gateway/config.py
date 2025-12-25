@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import yaml
+
 
 
 @dataclass(frozen=True)
@@ -17,6 +18,7 @@ class ServerConfig:
 @dataclass(frozen=True)
 class PathsConfig:
     tantivy_index_dir: str
+    log_dir: str
 
 
 @dataclass(frozen=True)
@@ -109,7 +111,9 @@ class AppConfig:
     scheduler: SchedulerConfig
 
 
-def load_config(path: str) -> AppConfig:
+def load_config(path: Optional[str] = None) -> AppConfig:
+    if path is None:
+        path = "/etc/rag-gateway/api.yaml"
     p = Path(path)
     if not p.exists():
         raise FileNotFoundError(f"Config not found: {path}")

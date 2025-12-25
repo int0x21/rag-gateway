@@ -16,8 +16,8 @@ APP_BIN_DIR="${APP_DIR}/bin"
 
 VAR_DIR="${APP_DIR}/var"
 TANTIVY_DIR="${VAR_DIR}/tantivy"
-SCHED_DIR="${VAR_DIR}/scheduler"
-SCHED_LOCK="${SCHED_DIR}/crawl.lock"
+LOG_DIR="${VAR_DIR}/log"
+VAR_LOCK="${VAR_DIR}/crawl.lock"
 
 GENERATOR_DIR="${MODELS_DIR}/generator/DeepSeek-R1-Distill-Qwen-32B"
 EMBED_DIR="${MODELS_DIR}/embeddings/Qwen3-Embedding-8B"
@@ -30,7 +30,6 @@ REQUIRED_UNITS=(
   "tei-rerank.service"
   "vllm.service"
   "rag-gateway.service"
-  "rag-crawl.timer"
 )
 
 # Tunable timeouts (seconds)
@@ -216,9 +215,10 @@ setup_gateway_venv() {
 
 ensure_rag_state_dirs() {
   log "Creating rag-gateway runtime state directories"
-  install -d -m 0755 "${VAR_DIR}" "${TANTIVY_DIR}" "${SCHED_DIR}"
+  install -d -m 0755 "${VAR_DIR}" "${TANTIVY_DIR}" "${LOG_DIR}"
   chown -R rag:rag "${VAR_DIR}"
 }
+
 
 backup_if_exists() {
   local path="$1"
@@ -235,10 +235,10 @@ deploy_configs() {
   log "Deploying config files to ${CONF_DIR}"
   install -d -m 0755 "${CONF_DIR}"
 
-  if [[ ! -f "${CONF_DIR}/config.yaml" ]]; then
-    install -m 0640 -o root -g rag "${repo_root}/etc/config.yaml" "${CONF_DIR}/config.yaml"
+  if [[ ! -f "${CONF_DIR}/api.yaml" ]]; then
+    install -m 0640 -o root -g rag "${repo_root}/etc/api.yaml" "${CONF_DIR}/api.yaml"
   else
-    backup_if_exists "${CONF_DIR}/config.yaml"
+    backup_if_exists "${CONF_DIR}/api.yaml"
   fi
 
   if [[ ! -f "${CONF_DIR}/sources.yaml" ]]; then
@@ -247,27 +247,31 @@ deploy_configs() {
     log "Keeping existing ${CONF_DIR}/sources.yaml (not overwritten)"
   fi
 
-  log "Patching ${CONF_DIR}/config.yaml paths for this filesystem layout"
+  if [[ ! -f "${CONF_DIR}/ingest.yaml" ]]; then
+    install -m 0640 -o root -g rag "${repo_root}/etc/ingest.yaml" "${CONF_DIR}/ingest.yaml"
+  else
+    backup_if_exists "${CONF_DIR}/ingest.yaml"
+  fi
+
+  log "Patching ${CONF_DIR}/api.yaml paths for this filesystem layout"
   python3 - <<PY
 from pathlib import Path
 import yaml
 
-p = Path("${CONF_DIR}/config.yaml")
+p = Path("${CONF_DIR}/api.yaml")
 raw = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
 
 raw.setdefault("paths", {})
 raw["paths"]["tantivy_index_dir"] = "${TANTIVY_DIR}"
-
-raw.setdefault("scheduler", {})
-raw["scheduler"]["state_dir"] = "${SCHED_DIR}"
-raw["scheduler"]["lock_file"] = "${SCHED_LOCK}"
-raw["scheduler"]["sources_file"] = "${CONF_DIR}/sources.yaml"
+raw["paths"]["log_dir"] = "${LOG_DIR}"
 
 p.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
 PY
 
-  chown root:rag "${CONF_DIR}/config.yaml"
-  chmod 0640 "${CONF_DIR}/config.yaml"
+  chown root:rag "${CONF_DIR}/api.yaml"
+  chmod 0640 "${CONF_DIR}/api.yaml"
+  chown root:rag "${CONF_DIR}/ingest.yaml"
+  chmod 0640 "${CONF_DIR}/ingest.yaml"
 }
 
 deploy_systemd_units() {
@@ -373,6 +377,7 @@ main() {
   ensure_rag_state_dirs
   deploy_configs "${repo_root}"
   deploy_systemd_units "${repo_root}"
+  deploy_cli_tool "${repo_root}"
   fix_permissions
 
   enable_start_stack
@@ -381,6 +386,26 @@ main() {
   log "Systemd is responsible for readiness gating and startup ordering."
   log "To verify: systemctl status ${STACK_TARGET} rag-gateway.service"
   log "Logs: journalctl -u rag-gateway.service -b --no-pager"
+}
+
+
+deploy_cli_tool() {
+  local repo_root="$1"
+  log "Installing CLI tool"
+  
+  local cli_script="${APP_DIR}/rag_gateway/ingestion/cli.py"
+  local bin_path="/usr/local/bin/rag-gateway-crawl"
+  
+  cat > "${bin_path}" <<'EOF'
+#!/usr/bin/env python3
+import sys
+sys.path.insert(0, '/opt/llm/rag-gateway')
+from rag_gateway.ingestion.cli import main
+sys.exit(main())
+EOF
+  
+  chmod +x "${bin_path}"
+  log "Installed CLI tool: ${bin_path}"
 }
 
 main "$@"

@@ -4,15 +4,13 @@ from typing import Dict, List, Optional
 
 from qdrant_client.http import models as qm
 
-from .tei_client import TEIClient
-from .tantivy_index import TantivyBM25
-from .qdrant_store import QdrantVectorStore
-from .models import IngestDocument, CrawlHTTP, CrawlGitHub
-from .ingest_pipeline import (
-    crawl_http_docs,
-    crawl_github_repo,
-    document_to_chunks,
-)
+from ..storage.tei_client import TEIClient
+from ..storage.tantivy_index import TantivyBM25
+from ..storage.qdrant_store import QdrantVectorStore
+from ..core.models import IngestDocument, CrawlHTTP, CrawlGitHub
+from ..ingestion.pipeline import document_to_chunks
+from ..ingestion.crawlers.http_crawler import crawl_http_docs
+from ..ingestion.crawlers.github_crawler import crawl_github_repo
 
 
 async def ingest_documents(
@@ -162,4 +160,3 @@ async def crawl_sources(
             )
 
     return docs
-
