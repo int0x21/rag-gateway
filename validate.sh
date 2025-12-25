@@ -85,6 +85,35 @@ test_json_response() {
     fi
 }
 
+test_post_endpoint() {
+    local url="$1"
+    local description="$2"
+    local payload="$3"
+    local expected_code="${4:-200}"
+
+    log "Testing $description..."
+    if response=$(curl -s -w "HTTPSTATUS:%{http_code}" -X POST "$url" \
+        -H "Content-Type: application/json" \
+        -d "$payload" 2>/dev/null); then
+
+        local body=$(echo "$response" | sed 's/HTTPSTATUS.*//')
+        local code=$(echo "$response" | grep "HTTPSTATUS:" | sed 's/.*HTTPSTATUS://')
+
+        if [ "$code" = "$expected_code" ]; then
+            success "$description responded with HTTP $code"
+            echo "$body"  # Return response body for further processing
+            return 0
+        else
+            error "$description failed: HTTP $code (expected $expected_code)"
+            echo "$body" >&2
+            return 1
+        fi
+    else
+        error "$description failed: connection error"
+        return 1
+    fi
+}
+
 test_chat_completions() {
     local url="$1"
 
@@ -177,10 +206,30 @@ main() {
     fi
 
     # Test TEI embedding
-    test_http_endpoint "$TEI_EMBED_URL/v1/embeddings" "TEI embedding endpoint" "200" || ((failed_tests++))
+    embed_payload='{"model": "Qwen/Qwen3-Embedding-8B", "input": ["test query"]}'
+    if response=$(test_post_endpoint "$TEI_EMBED_URL/v1/embeddings" "TEI embedding endpoint" "$embed_payload"); then
+        if echo "$response" | jq '.data[0].embedding | length' >/dev/null 2>&1; then
+            success "TEI embedding returned valid vector data"
+        else
+            error "TEI embedding returned invalid response: $response"
+            ((failed_tests++))
+        fi
+    else
+        ((failed_tests++))
+    fi
 
     # Test TEI reranking
-    test_http_endpoint "$TEI_RERANK_URL/v1/rerank" "TEI reranking endpoint" "200" || ((failed_tests++))
+    rerank_payload='{"model": "bge-reranker-large", "query": "test query", "texts": ["test text 1", "test text 2"]}'
+    if response=$(test_post_endpoint "$TEI_RERANK_URL/rerank" "TEI reranking endpoint" "$rerank_payload"); then
+        if echo "$response" | jq '.results | length' >/dev/null 2>&1; then
+            success "TEI reranking returned valid ranking data"
+        else
+            error "TEI reranking returned invalid response: $response"
+            ((failed_tests++))
+        fi
+    else
+        ((failed_tests++))
+    fi
 
     # Test VLLM models
     test_json_response "$VLLM_URL/v1/models" "VLLM models endpoint" || ((failed_tests++))
