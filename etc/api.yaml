@@ -47,3 +47,7 @@ prompting:
     Every non-trivial factual claim MUST be backed by citations in the form [chunk_id].
   citation_rule: "Cite only from the provided EVIDENCE chunks using [chunk_id]."
 
+chunking:
+  max_chars: 8000
+  overlap_chars: 800
+
