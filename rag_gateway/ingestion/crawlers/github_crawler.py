@@ -5,8 +5,8 @@ import subprocess
 import tempfile
 from typing import List, Optional
 
-from ..core.models import IngestDocument
-from ..core.text_processing import normalize_whitespace
+from ...core.models import IngestDocument
+from ...core.text_processing import normalize_whitespace
 
 
 TEXT_EXTS = {".md", ".markdown", ".rst", ".txt"}

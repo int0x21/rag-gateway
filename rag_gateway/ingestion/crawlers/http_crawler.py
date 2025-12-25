@@ -9,8 +9,8 @@ from urllib.parse import urljoin, urlparse
 import httpx
 from bs4 import BeautifulSoup
 
-from ..core.models import IngestDocument
-from ..core.text_processing import html_to_text, normalize_whitespace
+from ...core.models import IngestDocument
+from ...core.text_processing import html_to_text, normalize_whitespace
 
 
 def should_skip_url(url: str, allowed_domains: Set[str], allowed_prefixes: Optional[List[str]], exclude_patterns: Optional[List[str]]) -> bool:
