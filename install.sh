@@ -17,12 +17,10 @@ TANTIVY_DIR="${VAR_DIR}/tantivy"
 SCHED_DIR="${VAR_DIR}/scheduler"
 SCHED_LOCK="${SCHED_DIR}/crawl.lock"
 
-# Expected model directories (must match systemd unit paths)
 GENERATOR_DIR="${MODELS_DIR}/generator/DeepSeek-R1-Distill-Qwen-32B"
 EMBED_DIR="${MODELS_DIR}/embeddings/Qwen3-Embedding-8B"
 RERANK_DIR="${MODELS_DIR}/rerank/bge-reranker-large"
 
-# Stack entry point and required units
 STACK_TARGET="rag-stack.target"
 REQUIRED_UNITS=(
   "qdrant.service"
@@ -121,7 +119,6 @@ ensure_models_present() {
 }
 
 detect_python_for_vllm() {
-  # vLLM compatibility often lags behind newest Python; prefer 3.11 if available.
   local cand
   for cand in python3.11 python3.10 python3; do
     if command -v "${cand}" >/dev/null 2>&1; then
@@ -144,25 +141,26 @@ ensure_vllm_installed() {
   fi
 
   log "Installing vLLM into ${VLLM_DIR}/.venv"
+
+  # Ensure directories exist AND are writable by vllm user before creating venv
+  install -d -m 0755 "${VLLM_DIR}"
+  install -d -m 0755 "${HF_CACHE_DIR}"
+  chown -R vllm:vllm "${VLLM_DIR}" "${HF_CACHE_DIR}"
+
   local py
   py="$(detect_python_for_vllm)" || die "No python3 interpreter found (need python3 / python3.11 recommended)."
 
-  # Create venv as vllm user so ownership is correct
+  # Create venv as vllm user
   sudo -u vllm "${py}" -m venv "${VLLM_DIR}/.venv"
-
-  # Ensure HF cache is writable by vllm
-  chown -R vllm:vllm "${VLLM_DIR}" "${HF_CACHE_DIR}"
 
   # Install dependencies as vllm user
   sudo -u vllm "${VLLM_DIR}/.venv/bin/python" -m pip install --upgrade pip wheel >/dev/null
 
-  # vLLM install (GPU/driver dependent). If this fails, logs will show why.
   if ! sudo -u vllm "${VLLM_DIR}/.venv/bin/pip" install --upgrade "vllm"; then
-    die "Failed to install vLLM. Common causes: incompatible Python version, missing CUDA/toolchain, or unsupported platform. Check pip output above."
+    die "Failed to install vLLM. Common causes: incompatible Python version, missing CUDA/driver/toolchain, or unsupported platform."
   fi
 
   [[ -x "${VLLM_DIR}/.venv/bin/vllm" ]] || die "vLLM install completed but CLI missing: ${VLLM_DIR}/.venv/bin/vllm"
-
   log "vLLM installed successfully."
 }
 
@@ -378,7 +376,6 @@ main() {
   ensure_base_dirs
   ensure_models_present "${repo_root}"
 
-  # New: ensure vLLM runtime exists before starting stack
   ensure_vllm_installed
 
   deploy_app "${repo_root}"
