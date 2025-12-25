@@ -1,34 +1,29 @@
 [Unit]
 Description=RAG Gateway (FastAPI)
-Wants=network-online.target
-After=network-online.target
+After=network-online.target qdrant.service tei-embed.service tei-rerank.service vllm.service
+Wants=network-online.target qdrant.service tei-embed.service tei-rerank.service vllm.service
 
 [Service]
 Type=simple
 User=rag
 Group=rag
+
 WorkingDirectory=/opt/llm/rag-gateway
-
 Environment=PYTHONUNBUFFERED=1
+Environment=RAG_GATEWAY_CONFIG=/etc/rag-gateway/config.yaml
 
-# Ensure core dependencies are reachable before starting the API.
-# Note: ordering/dependency wiring is handled via systemd (rag-stack.target + drop-ins),
-# while readiness is enforced here with ExecStartPre checks.
+# Wait for dependencies (fast fail with bounded timeouts)
 ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name qdrant --url http://127.0.0.1:6333/collections --method GET --timeout 60
+ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name tei-embed --url http://127.0.0.1:8081/v1/embeddings --method POST --timeout 180 --json {"model":"Qwen/Qwen3-Embedding-8B","input":"ready"}
+ExecStartPre=/opt/llm/rag-gateway/bin/wait-vllm-models.sh --name vllm --url http://127.0.0.1:8000/v1/models --timeout 180 --min-models 1 --expect-id generator
 
-# TEI embed: send a small, valid OpenAI embeddings request.
-ExecStartPre=/opt/llm/rag-gateway/bin/wait-http.sh --name tei-embed --url http://127.0.0.1:8081/v1/embeddings --method POST --timeout 180 --json '{"model":"Qwen/Qwen3-Embedding-8B","input":"ready"}'
-
-# vLLM: do not allow gateway start until vLLM reports at least one loaded model,
-# and specifically until our configured generator model id is present.
-ExecStartPre=/opt/llm/rag-gateway/bin/wait-vllm-models.sh --url http://127.0.0.1:8000/v1/models --timeout 180 --min-models 1 --expect-id generator
-
-ExecStart=/opt/llm/rag-gateway/.venv/bin/uvicorn rag_gateway.main:app --host 0.0.0.0 --port 8001
+# Important: --app-dir makes imports reliable under systemd
+ExecStart=/opt/llm/rag-gateway/.venv/bin/uvicorn --app-dir /opt/llm/rag-gateway rag_gateway.main:app --host 0.0.0.0 --port 8001
 
 Restart=always
 RestartSec=2
-TimeoutStartSec=300
+LimitNOFILE=1048576
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=rag-stack.target
 
