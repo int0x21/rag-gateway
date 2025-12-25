@@ -273,15 +273,15 @@ main() {
     info "Phase 4: Storage & File Checks"
     echo
 
-    test_file_exists "/opt/llm/rag/var/tantivy" "Tantivy index directory" || ((failed_tests++))
-    test_file_exists "/opt/llm/rag/log" "Log directory" || ((failed_tests++))
+    test_file_exists "/opt/llm/rag-gateway/var/tantivy" "Tantivy index directory" || ((failed_tests++))
+    test_file_exists "/opt/llm/rag-gateway/var/log" "Log directory" || ((failed_tests++))
     test_file_exists "/etc/rag-gateway/api.yaml" "API config file" || ((failed_tests++))
     test_file_exists "/etc/rag-gateway/ingest.yaml" "Ingest config file" || ((failed_tests++))
     test_file_exists "/etc/rag-gateway/sources.yaml" "Sources config file" || ((failed_tests++))
 
     # Check if directories have content
-    test_directory_not_empty "/opt/llm/rag/var/tantivy" "Tantivy index" || true  # Not a failure if empty
-    test_directory_not_empty "/opt/llm/rag/log" "Log directory" || true  # Not a failure if empty
+    test_directory_not_empty "/opt/llm/rag-gateway/var/tantivy" "Tantivy index" || true  # Not a failure if empty
+    test_directory_not_empty "/opt/llm/rag-gateway/var/log" "Log directory" || true  # Not a failure if empty
 
     echo
 
