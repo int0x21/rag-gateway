@@ -404,9 +404,11 @@ deploy_cli_tool() {
 #!/bin/bash
 # RAG Gateway CLI Tool
 # Use the virtual environment if it exists
-VENV_PYTHON="/opt/llm/rag-gateway/.venv/bin/python3"
-if [ -x "$VENV_PYTHON" ]; then
-    exec "$VENV_PYTHON" -c "
+VENV_DIR="/opt/llm/rag-gateway/.venv"
+if [ -d "$VENV_DIR" ]; then
+    # Activate virtual environment
+    source "$VENV_DIR/bin/activate"
+    exec python3 -c "
 import sys
 sys.path.insert(0, '/opt/llm/rag-gateway')
 from rag_gateway.ingestion.cli import main
