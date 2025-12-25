@@ -315,6 +315,7 @@ async def crawl_sources(
     http_max_depth: int,
     http_timeout_s: int,
     http_delay_s: float,
+    http_max_concurrent: int,
     github_max_files: int,
     github_max_file_size_bytes: int,
 ) -> List[IngestDocument]:
@@ -330,6 +331,7 @@ async def crawl_sources(
                     max_depth=http_max_depth,
                     timeout_s=http_timeout_s,
                     delay_s=http_delay_s,
+                    max_concurrent=http_max_concurrent,
                 )
             )
 

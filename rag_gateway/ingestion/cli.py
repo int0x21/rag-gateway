@@ -359,6 +359,7 @@ async def run_crawl(
                     http_max_depth=ingest_cfg.get("http", {}).get("max_depth", 4),
                     http_timeout_s=ingest_cfg.get("http", {}).get("request_timeout_s", 30),
                     http_delay_s=ingest_cfg.get("http", {}).get("politeness_delay_s", 0.2),
+                    http_max_concurrent=ingest_cfg.get("http", {}).get("max_concurrent", 8),
                     github_max_files=ingest_cfg.get("github", {}).get("max_files", 5000),
                     github_max_file_size_bytes=ingest_cfg.get("github", {}).get("max_file_size_bytes", 2000000),
                 )
