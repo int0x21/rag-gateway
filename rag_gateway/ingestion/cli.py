@@ -82,7 +82,9 @@ def signal_handler(signum, frame):
         # Second Ctrl+C - force immediate exit
         print("\n\nForced shutdown requested. Exiting immediately...", file=sys.stderr)
         _FORCE_SHUTDOWN = True
-        sys.exit(128 + signum)
+        # Use os._exit for immediate termination from signal handler
+        import os
+        os._exit(128 + signum)
     else:
         # First Ctrl+C - graceful shutdown
         _SHUTDOWN_REQUESTED = True
