@@ -1,0 +1,52 @@
+#!/bin/bash
+# Analyze embedding failure logs
+
+LOG_DIR="${1:-/opt/llm/rag-gateway/var/log}"
+PATTERN="embedding_failures_*.jsonl"
+
+echo "=== Embedding Failure Analysis ==="
+echo "Log directory: $LOG_DIR"
+echo
+
+# Find all failure log files
+FAILURE_LOGS=$(find "$LOG_DIR" -name "$PATTERN" -type f 2>/dev/null | sort)
+
+if [ -z "$FAILURE_LOGS" ]; then
+    echo "✅ No embedding failure logs found - all embeddings successful!"
+    exit 0
+fi
+
+echo "Found $(echo "$FAILURE_LOGS" | wc -l) failure log file(s):"
+echo
+
+TOTAL_FAILURES=0
+for log_file in $FAILURE_LOGS; do
+    echo "📄 $(basename "$log_file")"
+
+    # Count total failures in this file
+    FILE_FAILURES=$(wc -l < "$log_file")
+    echo "   Total failures: $FILE_FAILURES"
+    TOTAL_FAILURES=$((TOTAL_FAILURES + FILE_FAILURES))
+
+    # Show failure types
+    echo "   Failures by type:"
+    jq -r '.error_type' "$log_file" 2>/dev/null | sort | uniq -c | sed 's/^/     /' || echo "     (unable to parse)"
+
+    # Show most recent failures
+    echo "   Recent failures:"
+    tail -3 "$log_file" 2>/dev/null | jq -r '"     \(.timestamp[:19]) \(.error_type) batch \(.batch_index)"' 2>/dev/null || echo "     (unable to parse recent failures)"
+
+    echo
+done
+
+echo "📊 Summary:"
+echo "   Total failures across all logs: $TOTAL_FAILURES"
+
+if [ $TOTAL_FAILURES -gt 0 ]; then
+    echo
+    echo "💡 Troubleshooting tips:"
+    echo "   - Check TEI service logs for '413 Payload Too Large' errors"
+    echo "   - Reduce embed_batch_size in ingest.yaml if needed"
+    echo "   - Check network connectivity to TEI services"
+    echo "   - Review failed batches for patterns (large documents, etc.)"
+fi
