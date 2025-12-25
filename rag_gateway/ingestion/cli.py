@@ -51,6 +51,7 @@ from ..ingestion.pipeline import document_to_chunks
 
 
 _SHUTDOWN_REQUESTED = False
+_FORCE_SHUTDOWN = False
 
 
 def setup_logging(log_dir: str, verbose: bool) -> logging.Logger:
@@ -76,9 +77,17 @@ def setup_logging(log_dir: str, verbose: bool) -> logging.Logger:
 
 
 def signal_handler(signum, frame):
-    global _SHUTDOWN_REQUESTED
-    _SHUTDOWN_REQUESTED = True
-    print("\n\nShutdown requested. Finishing current source...", file=sys.stderr)
+    global _SHUTDOWN_REQUESTED, _FORCE_SHUTDOWN
+    if _SHUTDOWN_REQUESTED:
+        # Second Ctrl+C - force immediate exit
+        print("\n\nForced shutdown requested. Exiting immediately...", file=sys.stderr)
+        _FORCE_SHUTDOWN = True
+        import sys
+        sys.exit(128 + signum)
+    else:
+        # First Ctrl+C - graceful shutdown
+        _SHUTDOWN_REQUESTED = True
+        print("\n\nShutdown requested. Finishing current source... (Ctrl+C again to force exit)", file=sys.stderr)
 
 
 def main():
@@ -213,16 +222,16 @@ async def run_reset(api_cfg, reset_qdrant: bool, reset_tantivy: bool, logger) ->
 
 
 async def run_crawl(
-    api_cfg: Any,
+    api_cfg,
     ingest_config_path: str,
     sources_path: str,
-    sources_filter: Optional[List[str]],
+    sources_filter: List[str],
     force: bool,
     dry_run: bool,
     verbose: bool,
     logger: logging.Logger,
 ) -> Dict[str, Any]:
-    global _SHUTDOWN_REQUESTED
+    global _SHUTDOWN_REQUESTED, _FORCE_SHUTDOWN
 
     import yaml
     ingest_cfg = yaml.safe_load(Path(ingest_config_path).read_text(encoding="utf-8")) or {}
@@ -282,6 +291,11 @@ async def run_crawl(
                 logger.warning("Shutdown requested, stopping after current source")
                 break
 
+            # Check for forced shutdown
+            if _FORCE_SHUTDOWN:
+                logger.error("Forced shutdown - exiting immediately")
+                sys.exit(128 + signal.SIGINT)
+
             try:
                 src_tags = _parse_tags(src, defaults)
                 src_dry = src.get("dry_run", defaults.get("dry_run", dry_run))
@@ -292,6 +306,12 @@ async def run_crawl(
                 gh_specs = _parse_github_specs(src)
 
                 logger.info(f"  Crawling {len(http_specs)} HTTP specs, {len(gh_specs)} GitHub specs...")
+
+                # Check for forced shutdown before starting async operations
+                if _FORCE_SHUTDOWN:
+                    logger.error("Forced shutdown - cancelling async operations")
+                    break
+
                 docs = await crawl_sources(
                     http_specs=http_specs,
                     github_specs=gh_specs,
