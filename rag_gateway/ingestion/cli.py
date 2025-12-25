@@ -192,16 +192,54 @@ async def run_reset(api_cfg, reset_qdrant: bool, reset_tantivy: bool, logger) ->
     try:
         if reset_qdrant:
             logger.info("Resetting Qdrant vector store")
-            qdrant = QdrantVectorStore(
-                url=api_cfg.upstreams.qdrant_url,
-                collection="chunks_v1",  # Use the known collection name
-                vector_size=4096,  # Should match TEI embed dimensions
-            )
-            # Note: Qdrant client doesn't have a simple reset method
-            # We would need to delete and recreate the collection
-            # For now, we'll just log that manual reset is needed
-            logger.warning("Qdrant reset requires manual collection deletion")
-            result["qdrant_message"] = "Manual reset required: delete and recreate collection"
+            try:
+                # Get vector size from existing collection if possible
+                from qdrant_client import QdrantClient
+                client = QdrantClient(url=api_cfg.upstreams.qdrant_url)
+
+                # Check if collection exists and get its configuration
+                collections = client.get_collections()
+                collection_names = [c.name for c in collections.collections]
+
+                if "chunks_v1" in collection_names:
+                    # Get collection info to preserve vector size
+                    collection_info = client.get_collection("chunks_v1")
+                    vector_size = collection_info.config.params.vectors.size
+
+                    # Delete the collection
+                    logger.info("Deleting existing Qdrant collection 'chunks_v1'")
+                    client.delete_collection("chunks_v1")
+
+                    # Recreate with same configuration
+                    logger.info(f"Recreating Qdrant collection 'chunks_v1' with vector size {vector_size}")
+                    client.create_collection(
+                        collection_name="chunks_v1",
+                        vectors_config={"size": vector_size, "distance": "Cosine"}
+                    )
+
+                    # Recreate payload indexes
+                    payload_fields = ["vendor", "product", "version", "source_type", "doc_id", "chunk_id"]
+                    for field in payload_fields:
+                        try:
+                            client.create_payload_index(
+                                collection_name="chunks_v1",
+                                field_name=field,
+                                field_schema="keyword"
+                            )
+                        except Exception as e:
+                            logger.warning(f"Failed to create payload index for {field}: {e}")
+
+                    result["reset_qdrant"] = True
+                    logger.info("Qdrant collection reset complete")
+                else:
+                    logger.info("Qdrant collection 'chunks_v1' does not exist, nothing to reset")
+                    result["reset_qdrant"] = True
+
+            except Exception as e:
+                error_msg = f"Failed to reset Qdrant collection: {str(e)}"
+                logger.error(error_msg)
+                result["errors"].append(error_msg)
+                result["qdrant_message"] = f"Qdrant reset failed: {str(e)}"
 
         if reset_tantivy:
             logger.info("Resetting Tantivy search index")
