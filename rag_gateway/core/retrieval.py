@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -134,7 +135,19 @@ async def retrieve_evidence(
         )
 
     texts = [c.text for c in cand_chunks]
-    rerank_json = await deps.tei.rerank(query=query, texts=texts)
+    batch_size = 100
+    if len(texts) <= batch_size:
+        rerank_json = await deps.tei.rerank(query=query, texts=texts)
+    else:
+        batches = [texts[i:i+batch_size] for i in range(0, len(texts), batch_size)]
+        rerank_jsons = await asyncio.gather(*[deps.tei.rerank(query=query, texts=batch) for batch in batches])
+        combined_results = []
+        for batch_idx, rj in enumerate(rerank_jsons):
+            start_idx = batch_idx * batch_size
+            for item in rj.get("results", []):
+                item["index"] += start_idx
+                combined_results.append(item)
+        rerank_json = {"results": combined_results}
     pairs = _normalize_rerank(rerank_json, n=len(cand_chunks))
 
     if not pairs:
