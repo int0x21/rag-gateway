@@ -186,11 +186,12 @@ PY
 deploy_systemd_units() {
   local repo_root="$1"
 
-  log "Deploying systemd unit files to ${SYSTEMD_DIR}"
+  log "Deploying systemd units to ${SYSTEMD_DIR}"
   install -d -m 0755 "${SYSTEMD_DIR}"
 
+  # Copy primary unit files (*.service, *.timer, *.target)
   local unit
-  for unit in "${repo_root}/systemd/"*.service "${repo_root}/systemd/"*.timer; do
+  for unit in "${repo_root}/systemd/"*.service "${repo_root}/systemd/"*.timer "${repo_root}/systemd/"*.target; do
     [[ -e "${unit}" ]] || continue
     local dst="${SYSTEMD_DIR}/$(basename "${unit}")"
     if [[ -f "${dst}" ]]; then
@@ -198,6 +199,20 @@ deploy_systemd_units() {
     fi
     install -m 0644 "${unit}" "${dst}"
   done
+
+  # Copy drop-in overrides if present
+  if [[ -d "${repo_root}/systemd/overrides" ]]; then
+    log "Deploying systemd drop-in overrides"
+    # Copy the tree into /etc/systemd/system/
+    # Expected layout: systemd/overrides/<unit>.d/*.conf
+    (cd "${repo_root}/systemd/overrides" && find . -type f -name "*.conf" -print0) | \
+      while IFS= read -r -d '' f; do
+        local rel="${f#./}"  # e.g. rag-gateway.service.d/10-stack.conf
+        local dst_dir="${SYSTEMD_DIR}/$(dirname "${rel}")"
+        install -d -m 0755 "${dst_dir}"
+        install -m 0644 "${repo_root}/systemd/overrides/${rel}" "${SYSTEMD_DIR}/${rel}"
+      done
+  fi
 
   # Patch unit files to reference /opt/llm/models for predownloaded models
   log "Patching unit files to use ${MODELS_DIR} for model locations"
@@ -216,6 +231,7 @@ deploy_systemd_units() {
 
   systemctl daemon-reload
 }
+
 
 fix_permissions() {
   log "Setting ownership/permissions"

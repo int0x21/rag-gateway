@@ -1,0 +1,16 @@
+[Unit]
+Description=RAG Stack (qdrant + TEI + vLLM + rag-gateway)
+Wants=network-online.target
+After=network-online.target
+
+# Pull in the stack components
+Wants=qdrant.service
+Wants=tei-embed.service
+Wants=tei-rerank.service
+Wants=vllm.service
+Wants=rag-gateway.service
+Wants=rag-crawl.timer
+
+[Install]
+WantedBy=multi-user.target
+
