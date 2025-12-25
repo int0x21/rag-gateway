@@ -406,22 +406,13 @@ deploy_cli_tool() {
 # Use the virtual environment if it exists
 VENV_DIR="/opt/llm/rag-gateway/.venv"
 if [ -d "$VENV_DIR" ]; then
-    # Activate virtual environment
-    source "$VENV_DIR/bin/activate"
-    exec python3 -c "
-import sys
-sys.path.insert(0, '/opt/llm/rag-gateway')
-from rag_gateway.ingestion.cli import main
-sys.exit(main())
-" "$@"
+    # Use virtual environment with proper PYTHONPATH
+    export PYTHONPATH="/opt/llm/rag-gateway"
+    exec "$VENV_DIR/bin/python3" -m rag_gateway.ingestion.cli "$@"
 else
     # Fallback to system python3
-    exec python3 -c "
-import sys
-sys.path.insert(0, '/opt/llm/rag-gateway')
-from rag_gateway.ingestion.cli import main
-sys.exit(main())
-" "$@"
+    export PYTHONPATH="/opt/llm/rag-gateway"
+    exec python3 -m rag_gateway.ingestion.cli "$@"
 fi
 EOF
   
