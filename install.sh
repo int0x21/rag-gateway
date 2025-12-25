@@ -195,8 +195,11 @@ deploy_runtime_helpers() {
   log "Deploying runtime helper scripts to ${APP_BIN_DIR}"
   install -d -m 0755 "${APP_BIN_DIR}"
   install -m 0755 "${repo_root}/scripts/wait-http.sh" "${APP_BIN_DIR}/wait-http.sh"
+  install -m 0755 "${repo_root}/scripts/wait-vllm-models.sh" "${APP_BIN_DIR}/wait-vllm-models.sh"
   chown root:root "${APP_BIN_DIR}/wait-http.sh"
+  chown root:root "${APP_BIN_DIR}/wait-vllm-models.sh"
   chmod 0755 "${APP_BIN_DIR}/wait-http.sh"
+  chmod 0755 "${APP_BIN_DIR}/wait-vllm-models.sh"
 }
 
 setup_gateway_venv() {
