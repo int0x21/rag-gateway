@@ -9,7 +9,7 @@ sources:
   - name: "sonic-core"
     enabled: true
     http_enabled: true
-    github_enabled: false
+    github_enabled: true
     tags: { vendor: "SONiC", product: "SONiC", source_type: "official_docs" }
     http:
       - start_urls: ["https://sonicfoundation.dev/"]
@@ -27,13 +27,13 @@ sources:
     github:
       - repo: "https://github.com/sonic-net/SONiC"
         ref: "master"
-        include_paths: ["doc", "README.md"]
+        include_paths: ["doc", "README.md", "src/**/doc", "Documentation"]
       - repo: "https://github.com/sonic-net/sonic-buildimage"
         ref: "master"
-        include_paths: ["doc", "docs", "README.md"]
+        include_paths: ["doc", "docs", "README.md", "src/**/doc", "src/**/Documentation"]
       - repo: "https://github.com/sonic-net/sonic-utilities"
         ref: "master"
-        include_paths: ["doc", "docs", "README.md"]
+        include_paths: ["doc", "docs", "README.md", "src/**/doc", "src/**/Documentation"]
 
   - name: "ceph-docs"
     enabled: false
