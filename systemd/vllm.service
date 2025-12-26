@@ -19,11 +19,10 @@ WorkingDirectory=/opt/llm/vllm
 
 ExecStart=/opt/llm/vllm/.venv/bin/vllm serve \
   --host 127.0.0.1 --port 8000 \
-  --model /opt/models/Qwen3-30B-A3B-Thinking-2507 \
+  Qwen/Qwen3-30B-A3B-Thinking-2507 \
   --served-model-name generator \
   --gpu-memory-utilization 0.92 \
   --max-model-len 262144 \
-  --enable-reasoning \
   --reasoning-parser deepseek_r1
 
 Restart=always
