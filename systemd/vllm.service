@@ -19,11 +19,12 @@ WorkingDirectory=/opt/llm/vllm
 
 ExecStart=/opt/llm/vllm/.venv/bin/vllm serve \
   --host 127.0.0.1 --port 8000 \
-  --model /opt/llm/vllm/models/DeepSeek-R1-Distill-Qwen-32B \
+  --model /opt/models/Qwen3-30B-A3B-Thinking-2507 \
   --served-model-name generator \
   --gpu-memory-utilization 0.92 \
-  --max-model-len 65536 \
-  --enforce-eager
+  --max-model-len 262144 \
+  --enable-reasoning \
+  --reasoning-parser deepseek_r1
 
 Restart=always
 RestartSec=2
