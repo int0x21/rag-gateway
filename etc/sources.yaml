@@ -17,13 +17,13 @@ sources:
         allowed_url_prefixes: ["https://sonicfoundation.dev/"]
         exclude_url_patterns: ["\\?"]
         max_pages: 300
-         max_depth: 2
+        max_depth: 2
       - start_urls: ["https://github.com/sonic-net/SONiC/wiki/SONiC-Documentation"]
-         allowed_domains: ["github.com"]
-         allowed_url_prefixes: ["https://github.com/sonic-net/"]
-         exclude_url_patterns: ["\\?"]
-         max_pages: 600
-         max_depth: 3
+        allowed_domains: ["github.com"]
+        allowed_url_prefixes: ["https://github.com/sonic-net/"]
+        exclude_url_patterns: ["\\?"]
+        max_pages: 600
+        max_depth: 3
     github:
       - repo: "https://github.com/sonic-net/SONiC"
         ref: "master"
