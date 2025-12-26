@@ -86,12 +86,22 @@ remove_vllm_dir_but_keep_venv() {
 }
 
 remove_paths_keep_models() {
+  local purge_data="$1"
+
   log "Removing application/config/support dirs (keeping ${MODELS_DIR})"
 
   rm -rf "${APP_DIR}" || true
   rm -rf "${CONF_DIR}" || true
 
-  rm -rf "${QDRANT_DIR}" || true
+  if [[ "${purge_data}" == "true" ]]; then
+    rm -rf "${QDRANT_DIR}" || true
+    log "Removed Qdrant data directory: ${QDRANT_DIR}"
+  else
+    if [[ -d "${QDRANT_DIR}" ]]; then
+      log "Preserved Qdrant data directory: ${QDRANT_DIR}"
+    fi
+  fi
+
   rm -rf "${TEI_DIR}" || true
   remove_vllm_dir_but_keep_venv
 
@@ -111,13 +121,36 @@ remove_cli_tool() {
 }
 
 main() {
+  PURGE_DATA=false
+
+  while [[ $# -gt 0 ]]; do
+    case $1 in
+      --purge-data)
+        PURGE_DATA=true
+        shift
+        ;;
+      --help)
+        echo "Usage: $0 [--purge-data]"
+        echo "  --purge-data: Remove Qdrant database and crawled data"
+        exit 0
+        ;;
+      *)
+        die "Unknown option: $1"
+        ;;
+    esac
+  done
+
   need_root
   stop_disable_units
   remove_units_dropins_and_baks
-  remove_paths_keep_models
+  remove_paths_keep_models "${PURGE_DATA}"
   remove_cli_tool
 
   log "Uninstall complete."
+  if [[ "${PURGE_DATA}" == "false" ]]; then
+    log "Note: Crawled data in ${QDRANT_DIR} was preserved."
+    log "Use '$0 --purge-data' for complete removal."
+  fi
   log "To confirm there are no failed units:"
   log "  systemctl --failed"
 }
