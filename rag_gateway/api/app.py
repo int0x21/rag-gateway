@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Any, Dict
 
 from fastapi import FastAPI
@@ -18,6 +19,18 @@ CONFIG_PATH_DEFAULT = "/etc/rag-gateway/api.yaml"
 
 def create_app(cfg: AppConfig) -> FastAPI:
     logging.basicConfig(level=getattr(logging, cfg.server.log_level.upper(), logging.INFO))
+
+    # Set up file logging for performance metrics
+    log_dir = Path("/opt/llm/rag-gateway/var/log")
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    file_handler = logging.FileHandler(log_dir / "rag_performance.log")
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    ))
+    logging.getLogger().addHandler(file_handler)
+
     app = FastAPI(title="RAG Gateway", version="0.2.0")
 
     set_config(cfg)
