@@ -144,7 +144,12 @@ async def retrieve_evidence(
         combined_results = []
         for batch_idx, rj in enumerate(rerank_jsons):
             start_idx = batch_idx * batch_size
-            for item in rj.get("results", []):
+            # Handle both dict (with "results" key) and list responses from TEI
+            if isinstance(rj, list):
+                results = rj
+            else:
+                results = rj.get("results", [])
+            for item in results:
                 item["index"] += start_idx
                 combined_results.append(item)
         rerank_json = {"results": combined_results}
