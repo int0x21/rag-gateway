@@ -43,7 +43,13 @@ async def chat_completions(
                     user_text = c
                     break
 
-        retrieval_query = user_text.strip() or "help"
+        user_text = user_text.strip()
+
+        # Strip <prompt> wrapper if it fully wraps the query
+        if user_text.startswith('<prompt>') and user_text.endswith('</prompt>'):
+            user_text = user_text[8:-9].strip()
+
+        retrieval_query = user_text or "help"
 
         logger.info(f"QUERY_START: '{retrieval_query[:50]}...' | MEM: {int(start_mem)}MB")
 
