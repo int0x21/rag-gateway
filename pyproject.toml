@@ -16,6 +16,7 @@ dependencies = [
   "tantivy>=0.22",
   "beautifulsoup4>=4.12",
   "lxml>=5.2",
+  "psutil>=5.9.0",
 ]
 
 [project.scripts]
