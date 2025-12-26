@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import time
+import logging
+import psutil
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -97,15 +100,30 @@ async def retrieve_evidence(
     rerank_top_k: int,
     evidence_top_k: int,
 ) -> RetrievalResult:
+    logger = logging.getLogger(__name__)
+
+    bm25_start = time.time()
     bm25_hits = deps.bm25.search(query, top_n=bm25_top_n)
+    bm25_time = time.time() - bm25_start
     bm25_rank = [h.chunk_id for h in bm25_hits if h.chunk_id]
+    logger.info(f"BM25: {len(bm25_hits)} hits in {bm25_time:.2f}s | MEM: {int(psutil.Process().memory_info().rss / 1024 / 1024)}MB")
 
+    embed_start = time.time()
     qvec = await deps.tei.embed_one(query)
-    vec_hits = deps.vec.search(vector=qvec, top_n=vec_top_n, filters=qdrant_filters)
-    vec_rank = [h.chunk_id for h in vec_hits if h.chunk_id]
+    embed_time = time.time() - embed_start
+    logger.info(f"EMBED: query embedded in {embed_time:.2f}s | MEM: {int(psutil.Process().memory_info().rss / 1024 / 1024)}MB")
 
+    vec_start = time.time()
+    vec_hits = deps.vec.search(vector=qvec, top_n=vec_top_n, filters=qdrant_filters)
+    vec_time = time.time() - vec_start
+    vec_rank = [h.chunk_id for h in vec_hits if h.chunk_id]
+    logger.info(f"VECTOR: {len(vec_hits)} hits in {vec_time:.2f}s | MEM: {int(psutil.Process().memory_info().rss / 1024 / 1024)}MB")
+
+    rrf_start = time.time()
     fused = rrf_fuse([bm25_rank, vec_rank], k=rrf_k)
     candidates = sorted(fused.items(), key=lambda x: x[1], reverse=True)[:rerank_top_k]
+    rrf_time = time.time() - rrf_start
+    logger.info(f"RRF: {len(candidates)} candidates in {rrf_time:.2f}s | MEM: {int(psutil.Process().memory_info().rss / 1024 / 1024)}MB")
 
     payload_by_id = {h.chunk_id: h.payload for h in vec_hits}
     stored_by_id = {h.chunk_id: h.stored for h in bm25_hits}
@@ -134,10 +152,13 @@ async def retrieve_evidence(
             )
         )
 
-    texts = [c.text[:2000] for c in cand_chunks]
+    texts = [c.text[:1000] for c in cand_chunks]
     batch_size = 10
+    rerank_start = time.time()
     if len(texts) <= batch_size:
         rerank_json = await deps.tei.rerank(query=query, texts=texts)
+        rerank_time = time.time() - rerank_start
+        logger.info(f"RERANK_SINGLE: {len(texts)} texts in {rerank_time:.2f}s | MEM: {int(psutil.Process().memory_info().rss / 1024 / 1024)}MB")
     else:
         batches = [texts[i:i+batch_size] for i in range(0, len(texts), batch_size)]
         rerank_jsons = await asyncio.gather(*[deps.tei.rerank(query=query, texts=batch) for batch in batches])
