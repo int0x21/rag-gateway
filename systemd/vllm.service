@@ -19,7 +19,7 @@ WorkingDirectory=/opt/llm/vllm
 
 ExecStart=/opt/llm/vllm/.venv/bin/vllm serve \
   --host 127.0.0.1 --port 8000 \
-  /opt/llm/models/generator/Qwen3-30B-A3B-Thinking-2507 \
+  --model /opt/llm/models/generator/Qwen3-30B-A3B-Thinking-2507 \
   --served-model-name generator \
   --gpu-memory-utilization 0.92 \
   --max-model-len 262144 \
