@@ -86,14 +86,15 @@ remove_vllm_dir_but_keep_venv() {
 }
 
 remove_paths_keep_models() {
-  local purge_data="$1"
+  local purge_crawl="$1"
+  local purge_models="$2"
 
-  log "Removing application/config/support dirs (keeping ${MODELS_DIR})"
+  log "Removing application/config/support dirs"
 
   rm -rf "${APP_DIR}" || true
   rm -rf "${CONF_DIR}" || true
 
-  if [[ "${purge_data}" == "true" ]]; then
+  if [[ "${purge_crawl}" == "true" ]]; then
     rm -rf "${QDRANT_DIR}" || true
     log "Removed Qdrant data directory: ${QDRANT_DIR}"
   else
@@ -108,10 +109,15 @@ remove_paths_keep_models() {
   rm -rf "${HF_CACHE_DIR}" || true
   rm -rf "${MODEL_TOOLS_DIR}" || true
 
-  if [[ -d "${MODELS_DIR}" ]]; then
-    log "Kept models directory: ${MODELS_DIR}"
+  if [[ "${purge_models}" == "true" ]]; then
+    rm -rf "${MODELS_DIR}" || true
+    log "Removed models directory: ${MODELS_DIR}"
   else
-    warn "Models directory not found: ${MODELS_DIR}"
+    if [[ -d "${MODELS_DIR}" ]]; then
+      log "Preserved models directory: ${MODELS_DIR}"
+    else
+      warn "Models directory not found: ${MODELS_DIR}"
+    fi
   fi
 }
 
@@ -121,17 +127,24 @@ remove_cli_tool() {
 }
 
 main() {
-  PURGE_DATA=false
+  PURGE_CRAWL=false
+  PURGE_MODELS=false
 
   while [[ $# -gt 0 ]]; do
     case $1 in
-      --purge-data)
-        PURGE_DATA=true
+      --purge-crawl)
+        PURGE_CRAWL=true
+        shift
+        ;;
+      --purge-models)
+        PURGE_MODELS=true
         shift
         ;;
       --help)
-        echo "Usage: $0 [--purge-data]"
-        echo "  --purge-data: Remove Qdrant database and crawled data"
+        echo "Usage: $0 [--purge-crawl] [--purge-models]"
+        echo "  --purge-crawl: Remove Qdrant database and crawled data"
+        echo "  --purge-models: Remove downloaded models"
+        echo "  Default: Preserve both crawl data and models"
         exit 0
         ;;
       *)
@@ -143,13 +156,18 @@ main() {
   need_root
   stop_disable_units
   remove_units_dropins_and_baks
-  remove_paths_keep_models "${PURGE_DATA}"
+  remove_paths_keep_models "${PURGE_CRAWL}" "${PURGE_MODELS}"
   remove_cli_tool
 
   log "Uninstall complete."
-  if [[ "${PURGE_DATA}" == "false" ]]; then
+  if [[ "${PURGE_CRAWL}" == "false" ]]; then
     log "Note: Crawled data in ${QDRANT_DIR} was preserved."
-    log "Use '$0 --purge-data' for complete removal."
+  fi
+  if [[ "${PURGE_MODELS}" == "false" ]]; then
+    log "Note: Models in ${MODELS_DIR} were preserved."
+  fi
+  if [[ "${PURGE_CRAWL}" == "false" || "${PURGE_MODELS}" == "false" ]]; then
+    log "Use '$0 --purge-crawl --purge-models' for complete removal."
   fi
   log "To confirm there are no failed units:"
   log "  systemctl --failed"
