@@ -9,7 +9,7 @@ Group=tei
 Environment=CUDA_VISIBLE_DEVICES=0
 Environment=HF_HOME=/opt/llm/tei/cache
 WorkingDirectory=/opt/llm/tei
-ExecStart=/usr/local/bin/text-embeddings-router --model-id /opt/llm/tei/models/bge-reranker-large --dtype float16 --hostname 127.0.0.1 --port 8082 --prometheus-port 9001 --payload-limit 8388608 --max-client-batch-size 200
+ExecStart=/usr/local/bin/text-embeddings-router --model-id /opt/llm/tei/models/bge-reranker-large --dtype float16 --hostname 127.0.0.1 --port 8082 --prometheus-port 9001 --payload-limit 8388608 --max-client-batch-size 200 --auto-truncate
 Restart=always
 RestartSec=2
 LimitNOFILE=1048576
