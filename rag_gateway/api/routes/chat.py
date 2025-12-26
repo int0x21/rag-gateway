@@ -27,12 +27,8 @@ async def chat_completions(
     start_mem = psutil.Process().memory_info().rss / 1024 / 1024
 
     try:
-        mode = req.rag.mode if req.rag and req.rag.mode else "selection"
-        filters = req.rag.filters if req.rag and req.rag.filters else {}
-
+        # Always use RAG with default settings
         evidence_top_k = cfg.retrieval.evidence_top_k
-        if mode in cfg.retrieval.mode_overrides and "evidence_top_k" in cfg.retrieval.mode_overrides[mode]:
-            evidence_top_k = int(cfg.retrieval.mode_overrides[mode]["evidence_top_k"])
 
         if cfg.safety.redact:
             for msg in req.messages:
@@ -49,24 +45,19 @@ async def chat_completions(
 
         retrieval_query = user_text.strip() or "help"
 
-        logger.info(f"QUERY_START: '{retrieval_query[:50]}...' | MODE: {mode} | MEM: {int(start_mem)}MB")
+        logger.info(f"QUERY_START: '{retrieval_query[:50]}...' | MEM: {int(start_mem)}MB")
 
-        # Skip RAG retrieval when mode is "off"
-        if mode == "off":
-            evidence_block = ""
-            retrieval_time = 0
-            evidence_count = 0
-        else:
-            retrieval_start = time.time()
-            result = await retrieval.retrieve(
-                query=retrieval_query,
-                filters=filters if filters else None,
-                evidence_top_k=evidence_top_k,
-            )
-            retrieval_time = time.time() - retrieval_start
-            evidence_count = len(result["evidence"])
-            logger.info(f"RETRIEVAL: {evidence_count} docs in {retrieval_time:.2f}s | MEM: {int(psutil.Process().memory_info().rss / 1024 / 1024)}MB")
-            evidence_block = build_evidence_block(result["evidence"])
+        # Always perform RAG retrieval
+        retrieval_start = time.time()
+        result = await retrieval.retrieve(
+            query=retrieval_query,
+            filters=None,
+            evidence_top_k=evidence_top_k,
+        )
+        retrieval_time = time.time() - retrieval_start
+        evidence_count = len(result["evidence"])
+        logger.info(f"RETRIEVAL: {evidence_count} docs in {retrieval_time:.2f}s | MEM: {int(psutil.Process().memory_info().rss / 1024 / 1024)}MB")
+        evidence_block = build_evidence_block(result["evidence"])
 
         evidence_build_start = time.time()
         system = (

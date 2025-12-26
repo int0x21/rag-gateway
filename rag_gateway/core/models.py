@@ -14,7 +14,6 @@ class ChatCompletionsRequest(BaseModel):
     model: Optional[str] = None
     messages: List[Dict[str, Any]]
     stream: Optional[bool] = False
-    rag: Optional[RagParams] = None
     safety: Optional[Dict[str, Any]] = None
 
 
