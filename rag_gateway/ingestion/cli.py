@@ -330,6 +330,9 @@ async def run_crawl(
                 logger.info(f"  Source {src_name} is disabled, skipping")
                 continue
 
+            http_enabled = src.get("http_enabled", defaults.get("http_enabled", True))
+            github_enabled = src.get("github_enabled", defaults.get("github_enabled", True))
+
             if _SHUTDOWN_REQUESTED:
                 logger.warning("Shutdown requested, stopping after current source")
                 break
@@ -345,8 +348,12 @@ async def run_crawl(
                 if dry_run:
                     src_dry = True
 
-                http_specs = _parse_http_specs(src)
-                gh_specs = _parse_github_specs(src)
+                http_specs = _parse_http_specs(src) if http_enabled else []
+                gh_specs = _parse_github_specs(src) if github_enabled else []
+
+                if not http_specs and not gh_specs:
+                    logger.info(f"  No enabled crawlers for {src_name}, skipping")
+                    continue
 
                 logger.info(f"  Crawling {len(http_specs)} HTTP specs, {len(gh_specs)} GitHub specs...")
 

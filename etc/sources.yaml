@@ -1,11 +1,15 @@
 defaults:
   enabled: true
+  http_enabled: true
+  github_enabled: true
   dry_run: false
   preview_items: 10
 
 sources:
   - name: "sonic-core"
     enabled: true
+    http_enabled: true
+    github_enabled: false
     tags: { vendor: "SONiC", product: "SONiC", source_type: "official_docs" }
     http:
       - start_urls: ["https://sonicfoundation.dev/"]
@@ -33,6 +37,8 @@ sources:
 
   - name: "ceph-docs"
     enabled: false
+    http_enabled: false
+    github_enabled: false
     tags: { vendor: "Ceph", product: "Ceph", source_type: "official_docs" }
     http:
       - start_urls: ["https://docs.ceph.com/en/latest/"]
@@ -48,6 +54,8 @@ sources:
 
   - name: "drbd-linbit"
     enabled: false
+    http_enabled: false
+    github_enabled: false
     tags: { vendor: "LINBIT", product: "DRBD", source_type: "official_docs" }
     http:
       - start_urls: ["https://linbit.com/drbd-user-guide/drbd-guide-9_0-en/"]
@@ -66,6 +74,8 @@ sources:
 
   - name: "clusterlabs-ha-stack"
     enabled: false
+    http_enabled: false
+    github_enabled: false
     tags: { vendor: "ClusterLabs", product: "Pacemaker", source_type: "official_docs" }
     http:
       - start_urls: ["https://clusterlabs.org/projects/pacemaker/doc/index.php"]
@@ -93,6 +103,8 @@ sources:
 
   - name: "arista-eos-and-avd"
     enabled: false
+    http_enabled: false
+    github_enabled: false
     tags: { vendor: "Arista", product: "EOS", source_type: "official_docs" }
     http:
       - start_urls: ["https://www.arista.com/en/um-eos"]
@@ -120,6 +132,8 @@ sources:
 
   - name: "cisco-ios-xe-17"
     enabled: false
+    http_enabled: false
+    github_enabled: false
     tags: { vendor: "Cisco", product: "IOS-XE", version: "17", source_type: "official_docs" }
     http:
       - start_urls:
@@ -135,6 +149,8 @@ sources:
 
   - name: "cisco-nx-os"
     enabled: false
+    http_enabled: false
+    github_enabled: false
     tags: { vendor: "Cisco", product: "NX-OS", source_type: "official_docs" }
     http:
       - start_urls:
