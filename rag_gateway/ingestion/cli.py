@@ -326,6 +326,10 @@ async def run_crawl(
             src_name = src.get("name", f"unnamed_{idx}")
             logger.info(f"[{idx}/{len(sources)}] Processing source: {src_name}")
 
+            if not src.get("enabled", defaults.get("enabled", True)):
+                logger.info(f"  Source {src_name} is disabled, skipping")
+                continue
+
             if _SHUTDOWN_REQUESTED:
                 logger.warning("Shutdown requested, stopping after current source")
                 break

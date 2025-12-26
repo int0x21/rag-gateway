@@ -134,8 +134,8 @@ async def retrieve_evidence(
             )
         )
 
-    texts = [c.text for c in cand_chunks]
-    batch_size = 100
+    texts = [c.text[:2000] for c in cand_chunks]
+    batch_size = 10
     if len(texts) <= batch_size:
         rerank_json = await deps.tei.rerank(query=query, texts=texts)
     else:
