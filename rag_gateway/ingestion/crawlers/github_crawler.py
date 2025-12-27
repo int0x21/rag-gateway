@@ -43,6 +43,8 @@ def crawl_github_repo(spec: IngestDocument, max_files: int, max_file_size_bytes:
         repo_dir = os.path.join(tmp, "repo")
 
         cmd = ["git", "clone", "--depth", "1"]
+        actual_ref = spec.ref  # Track which ref we actually use
+        
         if spec.ref:
             cmd += ["--branch", spec.ref, spec.repo, repo_dir]
             subprocess.check_call(cmd)
@@ -50,12 +52,15 @@ def crawl_github_repo(spec: IngestDocument, max_files: int, max_file_size_bytes:
             # Try main branch first, then master
             try:
                 subprocess.check_call(cmd + ["--branch", "main", spec.repo, repo_dir])
+                actual_ref = "main"
             except subprocess.CalledProcessError:
                 try:
                     subprocess.check_call(cmd + ["--branch", "master", spec.repo, repo_dir])
+                    actual_ref = "master"
                 except subprocess.CalledProcessError:
                     # Fall back to default branch
                     subprocess.check_call(cmd + [spec.repo, repo_dir])
+                    actual_ref = "HEAD"  # Default branch
 
         docs: List[IngestDocument] = []
         count = 0
@@ -77,11 +82,16 @@ def crawl_github_repo(spec: IngestDocument, max_files: int, max_file_size_bytes:
                         text = normalize_whitespace(f.read())
                     if len(text) < 200:
                         continue
+                    
+                    # Construct proper GitHub blob URL for direct access
+                    # Format: https://github.com/{owner}/{repo}/blob/{ref}/{path}
+                    github_url = f"{spec.repo}/blob/{actual_ref}/{rel}"
+                    
                     docs.append(
                         IngestDocument(
                             title=f"{os.path.basename(spec.repo)}:{rel}",
                             source_type="code",
-                            url_or_path=f"{spec.repo}::{rel}",
+                            url_or_path=github_url,
                             text=text,
                         )
                     )

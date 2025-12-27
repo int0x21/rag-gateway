@@ -174,6 +174,18 @@ async def chat_completions(
         )
 
 
+def truncate_title(title: str, max_len: int = 40) -> str:
+    """Truncate title to max_len chars, adding ellipsis if needed."""
+    if len(title) <= max_len:
+        return title
+    return title[:max_len - 3] + "..."
+
+
+def sanitize_markdown_title(title: str) -> str:
+    """Escape characters that would break markdown link syntax."""
+    return title.replace("[", "\\[").replace("]", "\\]")
+
+
 def build_evidence_block(evidence: List[Any]) -> str:
     """Build the evidence block that gets injected into the system prompt."""
     if not evidence:
@@ -187,10 +199,12 @@ def build_evidence_block(evidence: List[Any]) -> str:
         version = ch.version or ""
         version_str = f" v{version}" if version else ""
         
-        parts.append(f"[{ch.chunk_id}]")
-        parts.append(f"Title: {ch.title}")
+        # Create markdown link citation: [Title](URL)
+        safe_title = sanitize_markdown_title(truncate_title(ch.title))
+        url = ch.url_or_path or ""
+        
+        parts.append(f"[{safe_title}]({url})")
         parts.append(f"Vendor/Product: {vendor}/{product}{version_str}")
-        parts.append(f"Source: {ch.source} | {ch.url_or_path}")
         parts.append("---")
         parts.append(ch.text.strip())
         parts.append("---")

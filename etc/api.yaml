@@ -54,7 +54,8 @@ prompting:
     Every factual claim MUST cite evidence using [chunk_id]. Claims without citations are FORBIDDEN.
   citation_rule: |
     CITATION RULES:
-    - Cite ONLY from the EVIDENCE chunks below using [chunk_id] format.
+    - Cite ONLY from the EVIDENCE chunks below using the markdown link format shown: [Title](URL)
+    - Copy the exact [Title](URL) from the evidence header when citing a source.
     - If you cannot find supporting evidence for a command or statement, DO NOT make the claim.
     - It is MUCH better to say "I don't have this information in my documentation" than to guess incorrectly.
     - Hallucinating commands that don't exist will cause production outages. When in doubt, don't.
