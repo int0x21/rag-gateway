@@ -6,7 +6,30 @@ from .text_processing import normalize_whitespace
 
 
 def chunk_text(text: str, max_chars: int, overlap_chars: int) -> List[str]:
+    """
+    Split text into chunks of at most max_chars, with paragraph-aware boundaries.
+    
+    Args:
+        text: The text to chunk
+        max_chars: Maximum characters per chunk (must be > 0)
+        overlap_chars: Reserved for future overlap implementation (currently unused)
+    
+    Returns:
+        List of text chunks
+    
+    Raises:
+        ValueError: If max_chars <= 0 or overlap_chars < 0 or overlap_chars >= max_chars
+    """
+    if max_chars <= 0:
+        raise ValueError(f"max_chars must be positive, got {max_chars}")
+    if overlap_chars < 0:
+        raise ValueError(f"overlap_chars must be non-negative, got {overlap_chars}")
+    if overlap_chars >= max_chars:
+        raise ValueError(f"overlap_chars ({overlap_chars}) must be less than max_chars ({max_chars})")
+    
     t = normalize_whitespace(text)
+    if not t:
+        return []
     if len(t) <= max_chars:
         return [t]
 

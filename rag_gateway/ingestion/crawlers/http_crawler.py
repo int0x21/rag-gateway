@@ -23,7 +23,7 @@ async def crawl_urls_parallel(
     timeout: float = 30.0,
     user_agent: str = "rag-gateway/0.1",
     continue_on_failure: bool = True
-) -> List[Tuple[str, Optional[str]]]:
+) -> List[Tuple[str, Optional[str], Optional[str]]]:
     """
     Crawl multiple URLs concurrently with controlled parallelism.
 
@@ -36,7 +36,7 @@ async def crawl_urls_parallel(
         continue_on_failure: Continue processing despite individual failures
 
     Returns:
-        List of (url, content) tuples, None content for failed requests
+        List of (url, raw_html, plain_text) tuples, None for failed requests
     """
     # Validate and clamp concurrency limits
     max_concurrent = min(max_concurrent, max_total)
@@ -44,7 +44,7 @@ async def crawl_urls_parallel(
     semaphore = asyncio.Semaphore(max_concurrent)
     results = []
 
-    async def fetch_single_url(url: str) -> Tuple[str, Optional[str]]:
+    async def fetch_single_url(url: str) -> Tuple[str, Optional[str], Optional[str]]:
         async with semaphore:
             try:
                 async with httpx.AsyncClient(
@@ -56,16 +56,17 @@ async def crawl_urls_parallel(
                     response = await client.get(url)
                     response.raise_for_status()
 
-                    # Process content
-                    text = html_to_text(response.text)
-                    logger.debug(f"Completed: {url} ({len(text)} chars)")
-                    return url, text
+                    # Return both raw HTML (for link extraction) and plain text (for content)
+                    raw_html = response.text
+                    plain_text = html_to_text(raw_html)
+                    logger.debug(f"Completed: {url} ({len(plain_text)} chars)")
+                    return url, raw_html, plain_text
 
             except Exception as e:
                 logger.warning(f"Failed to fetch {url}: {e}")
                 if not continue_on_failure:
                     raise
-                return url, None
+                return url, None, None
 
     # Execute all requests concurrently
     logger.info(f"Starting parallel fetch of {len(urls)} URLs (max_concurrent={max_concurrent})")
@@ -81,7 +82,7 @@ async def crawl_urls_parallel(
         else:
             results.append(result)
 
-    successful = sum(1 for _, content in results if content is not None)
+    successful = sum(1 for _, html, _ in results if html is not None)
     failed = len(results) - successful
 
     logger.info(f"Parallel fetch complete: {successful} successful, {failed} failed")
@@ -130,7 +131,7 @@ async def crawl_http_docs(
 
     # Tracking structures
     visited: Set[str] = set()
-    fetched_content: Dict[str, str] = {}  # url -> content
+    fetched_content: Dict[str, Tuple[str, str]] = {}  # url -> (raw_html, plain_text)
     queue: Deque[Tuple[str, int]] = deque([(u, 0) for u in spec.start_urls])
     documents: List[IngestDocument] = []
 
@@ -171,19 +172,21 @@ async def crawl_http_docs(
         # Process batch results and extract links for next level
         new_links: List[Tuple[str, int]] = []
 
-        for (url, depth), (fetched_url, content) in zip(batch_metadata, batch_results):
-            if content and len(content) >= 200:
-                # Store content for later document creation
-                fetched_content[url] = content
+        for (url, depth), (fetched_url, raw_html, plain_text) in zip(batch_metadata, batch_results):
+            if plain_text and len(plain_text) >= 200:
+                # Store both raw HTML (for title extraction) and plain text (for content)
+                fetched_content[url] = (raw_html or "", plain_text)
 
-                # Extract links if within depth limit
-                if depth < max_depth:
+                # Extract links from raw HTML if within depth limit
+                if depth < max_depth and raw_html:
                     try:
-                        soup = BeautifulSoup(content, "lxml")
+                        soup = BeautifulSoup(raw_html, "lxml")
                         for a in soup.find_all("a", href=True):
-                            link = urljoin(url, a["href"]).split("#", 1)[0]
-                            if link and link not in visited and len(fetched_content) + len(new_links) < max_pages:
-                                new_links.append((link, depth + 1))
+                            href = a.get("href")
+                            if href and isinstance(href, str):
+                                link = urljoin(url, href).split("#", 1)[0]
+                                if link and link not in visited and len(fetched_content) + len(new_links) < max_pages:
+                                    new_links.append((link, depth + 1))
                     except Exception as e:
                         logger.debug(f"Failed to extract links from {url}: {e}")
 
@@ -197,20 +200,20 @@ async def crawl_http_docs(
             await asyncio.sleep(delay_s)
 
     # Convert fetched content to documents
-    for url, content in fetched_content.items():
+    for url, (raw_html, plain_text) in fetched_content.items():
         try:
-            # Extract title
+            # Extract title from raw HTML
             title = url
-            title_match = re.search(r"<title>(.*?)</title>", content, re.IGNORECASE | re.DOTALL)
+            title_match = re.search(r"<title>(.*?)</title>", raw_html, re.IGNORECASE | re.DOTALL)
             if title_match:
                 title = normalize_whitespace(title_match.group(1))[:200] or url
 
-            # Create document
+            # Create document with plain text content
             doc = IngestDocument(
                 title=title,
                 source_type="crawled_docs",
                 url_or_path=url,
-                text=content,
+                text=plain_text,
             )
             documents.append(doc)
 

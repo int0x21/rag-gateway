@@ -102,15 +102,6 @@ class ChunkRecord:
     text: str
 
 
-@dataclass
-class TantivyHit:
-    chunk_id: str
-    score: float
-    stored: Dict[str, Any]
-
-
-@dataclass
-class QdrantHit:
-    chunk_id: str
-    score: float
-    payload: Dict[str, Any]
+# Note: TantivyHit and QdrantHit are defined in their respective storage modules:
+# - rag_gateway.storage.tantivy_index.TantivyHit
+# - rag_gateway.storage.qdrant_store.QdrantHit

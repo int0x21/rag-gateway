@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import Depends
-from typing import Annotated
+from typing import Annotated, Optional
 
 from ..config import AppConfig
 from ..core.retrieval import RetrievalService
@@ -13,11 +13,12 @@ from ..storage.vllm_client import VLLMClient
 CONFIG_PATH_DEFAULT = "/etc/rag-gateway/api.yaml"
 
 
-_config: AppConfig = None
-_bm25: TantivyBM25 = None
-_qdrant: QdrantVectorStore = None
-_tei: TEIClient = None
-_retrieval: RetrievalService = None
+_config: Optional[AppConfig] = None
+_bm25: Optional[TantivyBM25] = None
+_qdrant: Optional[QdrantVectorStore] = None
+_tei: Optional[TEIClient] = None
+_vllm: Optional[VLLMClient] = None
+_retrieval: Optional[RetrievalService] = None
 
 
 def set_config(cfg: AppConfig) -> None:
@@ -26,7 +27,7 @@ def set_config(cfg: AppConfig) -> None:
 
 
 async def initialize_storage() -> None:
-    global _bm25, _qdrant, _tei, _retrieval
+    global _bm25, _qdrant, _tei, _vllm, _retrieval
 
     if _config is None:
         raise RuntimeError("Config not set. Call set_config() first.")
@@ -38,6 +39,7 @@ async def initialize_storage() -> None:
         embed_model=_config.models.embed_model,
         rerank_model=_config.models.rerank_model,
     )
+    _vllm = VLLMClient(_config.upstreams.vllm_url)
 
     probe = await _tei.embed_one("dimension_probe")
     vector_size = len(probe)
@@ -89,9 +91,9 @@ async def get_retrieval() -> RetrievalService:
 
 
 async def get_vllm() -> VLLMClient:
-    if _config is None:
-        raise RuntimeError("Config not loaded")
-    return VLLMClient(_config.upstreams.vllm_url)
+    if _vllm is None:
+        raise RuntimeError("vLLM client not initialized")
+    return _vllm
 
 
 ConfigDep = Annotated[AppConfig, Depends(get_config)]

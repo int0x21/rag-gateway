@@ -21,7 +21,7 @@ def create_app(cfg: AppConfig) -> FastAPI:
     logging.basicConfig(level=getattr(logging, cfg.server.log_level.upper(), logging.INFO))
 
     # Set up file logging for performance metrics
-    log_dir = Path("/opt/llm/rag-gateway/var/log")
+    log_dir = Path(cfg.paths.log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
 
     file_handler = logging.FileHandler(log_dir / "rag_performance.log")
