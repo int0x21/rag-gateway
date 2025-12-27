@@ -23,6 +23,14 @@ async def chat_completions(
     vllm: VLLMDep,
 ):
     logger = logging.getLogger(__name__)
+    user_text = ""  # Initialize for error logging
+
+    # Log raw request details for debugging
+    logger.info(f"RAW_REQUEST: model={req.model}, messages_count={len(req.messages)}")
+    for i, msg in enumerate(req.messages):
+        content_preview = msg.get('content', '')[:200] + '...' if len(msg.get('content', '')) > 200 else msg.get('content', '')
+        logger.info(f"RAW_MESSAGE_{i}: role={msg.get('role')}, content_preview='{content_preview}'")
+
     start_time = time.time()
     start_mem = psutil.Process().memory_info().rss / 1024 / 1024
 
@@ -43,11 +51,15 @@ async def chat_completions(
                     user_text = c
                     break
 
+        logger.info(f"PRE_PROCESS: user_text_raw='{user_text[:500]}{'...' if len(user_text) > 500 else ''}'")
+
         user_text = user_text.strip()
 
         # Strip <prompt> wrapper if it fully wraps the query
         if user_text.startswith('<prompt>') and user_text.endswith('</prompt>'):
             user_text = user_text[8:-9].strip()
+
+        logger.info(f"POST_STRIP: user_text='{user_text[:500]}{'...' if len(user_text) > 500 else ''}'")
 
         retrieval_query = user_text or "help"
 
@@ -105,7 +117,7 @@ async def chat_completions(
     except Exception as e:
         total_time = time.time() - start_time
         end_mem = psutil.Process().memory_info().rss / 1024 / 1024
-        logger.error(f"ERROR: {str(e)} | TOTAL_TIME: {total_time:.2f}s | MEM: {int(end_mem)}MB")
+        logger.error(f"ERROR_CONTEXT: raw_messages_count={len(req.messages)}, processed_query='{user_text[:200]}...', error={str(e)} | TOTAL_TIME: {total_time:.2f}s | MEM: {int(end_mem)}MB")
         # Return proper JSON error instead of plain text
         raise HTTPException(
             status_code=500,
