@@ -14,12 +14,6 @@ from ..storage.qdrant_store import QdrantVectorStore
 from ..storage.tei_client import TEIClient
 
 
-def escape_search_query(query: str) -> str:
-    """Escape special characters that cause search backend parsing errors"""
-    # Escape characters that Tantivy interprets as query operators
-    # Focus on the most problematic: < > and other range/query operators
-    return query.replace('<', '\<').replace('>', '\>').replace(':', '\:')
-
 
 def rrf_fuse(ranked_lists: List[List[str]], k: int = 60) -> Dict[str, float]:
     scores: Dict[str, float] = {}
@@ -111,8 +105,7 @@ async def retrieve_evidence(
     logger = logging.getLogger(__name__)
 
     bm25_start = time.time()
-    search_query = escape_search_query(query)
-    bm25_hits = deps.bm25.search(search_query, top_n=bm25_top_n)
+    bm25_hits = deps.bm25.search(query, top_n=bm25_top_n)
     bm25_time = time.time() - bm25_start
     bm25_rank = [h.chunk_id for h in bm25_hits if h.chunk_id]
     logger.info(f"BM25: {len(bm25_hits)} hits in {bm25_time:.2f}s | MEM: {int(psutil.Process().memory_info().rss / 1024 / 1024)}MB")
