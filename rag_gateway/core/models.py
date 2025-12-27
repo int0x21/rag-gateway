@@ -2,19 +2,28 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pydantic import BaseModel, Field
-from typing import Any, Dict, List, Optional, Tuple
-
-
-class RagParams(BaseModel):
-    mode: Optional[str] = Field(default=None, description="selection|file|diff|doc_search")
-    filters: Optional[Dict[str, Any]] = None
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 
 class ChatCompletionsRequest(BaseModel):
-    model: Optional[str] = None
+    model: str
     messages: List[Dict[str, Any]]
+    frequency_penalty: Optional[float] = 0
+    logit_bias: Optional[Dict[str, float]] = None
+    logprobs: Optional[bool] = False
+    top_logprobs: Optional[int] = None
+    max_tokens: Optional[int] = None
+    n: Optional[int] = 1
+    presence_penalty: Optional[float] = 0
+    response_format: Optional[Dict[str, Any]] = None
+    seed: Optional[int] = None
+    stop: Optional[Union[str, List[str]]] = None
     stream: Optional[bool] = False
-    safety: Optional[Dict[str, Any]] = None
+    temperature: Optional[float] = 1
+    top_p: Optional[float] = 1
+    tools: Optional[List[Dict[str, Any]]] = None
+    tool_choice: Optional[Union[str, Dict[str, Any]]] = None
+    user: Optional[str] = None
 
 
 class EvidenceChunk(BaseModel):

@@ -91,10 +91,25 @@ async def chat_completions(
         logger.info(f"EVIDENCE_BUILD: {len(evidence_block)} chars in {evidence_build_time:.2f}s | MEM: {int(psutil.Process().memory_info().rss / 1024 / 1024)}MB")
 
         upstream_payload: Dict[str, Any] = {
-            "model": cfg.models.generator_model if req.model is None else req.model,
+            "model": req.model,
             "messages": msgs,
             "stream": bool(req.stream),
         }
+
+        # Add supported OpenAI parameters
+        if req.temperature is not None:
+            upstream_payload["temperature"] = req.temperature
+        if req.top_p is not None:
+            upstream_payload["top_p"] = req.top_p
+        if req.max_tokens is not None:
+            upstream_payload["max_tokens"] = req.max_tokens
+        if req.stop is not None:
+            upstream_payload["stop"] = req.stop
+        if req.presence_penalty is not None:
+            upstream_payload["presence_penalty"] = req.presence_penalty
+        if req.frequency_penalty is not None:
+            upstream_payload["frequency_penalty"] = req.frequency_penalty
+        # Add other supported parameters as VLLM adds support
 
         if req.stream:
             logger.info(f"LLM_STREAM: initiated | MEM: {int(psutil.Process().memory_info().rss / 1024 / 1024)}MB")
