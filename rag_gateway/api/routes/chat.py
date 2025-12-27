@@ -15,6 +15,35 @@ from ...core.text_processing import redact_text
 router = APIRouter()
 
 
+def log_evidence_summary(evidence: List[Any], logger: logging.Logger) -> None:
+    """Log evidence chunks with curl-friendly URLs for easy inspection."""
+    if not evidence:
+        logger.info("EVIDENCE_SUMMARY: No evidence chunks retrieved")
+        return
+    
+    logger.info(f"EVIDENCE_SUMMARY: {len(evidence)} chunks retrieved")
+    logger.info("=" * 80)
+    
+    for i, ch in enumerate(evidence):
+        # Build a clean, copy-pasteable curl command for the source URL
+        url = ch.url_or_path or "N/A"
+        if url.startswith("http"):
+            curl_cmd = f"curl -sL '{url}'"
+        else:
+            curl_cmd = f"# Local path: {url}"
+        
+        vendor_info = f"{ch.vendor or 'unknown'}/{ch.product or 'unknown'}"
+        
+        logger.info(
+            f"EVIDENCE[{i}]: score={ch.score:.3f} | {vendor_info} | {ch.title[:60]}"
+        )
+        logger.info(f"  chunk_id: {ch.chunk_id}")
+        logger.info(f"  source: {ch.source} | {curl_cmd}")
+        logger.info(f"  text_preview: {ch.text[:150].replace(chr(10), ' ')}...")
+    
+    logger.info("=" * 80)
+
+
 @router.post("/v1/chat/completions")
 async def chat_completions(
     req: ChatCompletionsRequest,
@@ -25,11 +54,13 @@ async def chat_completions(
     logger = logging.getLogger(__name__)
     user_text = ""  # Initialize for error logging
 
-    # Log raw request details for debugging
-    logger.info(f"RAW_REQUEST: model={req.model}, messages_count={len(req.messages)}")
-    for i, msg in enumerate(req.messages):
-        content_preview = msg.get('content', '')[:200] + '...' if len(msg.get('content', '')) > 200 else msg.get('content', '')
-        logger.info(f"RAW_MESSAGE_{i}: role={msg.get('role')}, content_preview='{content_preview}'")
+    # Log request summary (detailed message logging moved to DEBUG level)
+    logger.info(f"REQUEST: model={req.model}, messages={len(req.messages)}")
+    if logger.isEnabledFor(logging.DEBUG):
+        for i, msg in enumerate(req.messages):
+            content = msg.get('content', '')
+            preview = content[:200] + '...' if len(content) > 200 else content
+            logger.debug(f"MESSAGE[{i}]: role={msg.get('role')}, content='{preview}'")
 
     start_time = time.time()
     start_mem = psutil.Process().memory_info().rss / 1024 / 1024
@@ -69,20 +100,29 @@ async def chat_completions(
         retrieval_time = time.time() - retrieval_start
         evidence_count = len(result["evidence"])
         logger.info(f"RETRIEVAL: {evidence_count} docs in {retrieval_time:.2f}s | MEM: {int(psutil.Process().memory_info().rss / 1024 / 1024)}MB")
+        
+        # Log detailed evidence summary for debugging hallucinations
+        log_evidence_summary(result["evidence"], logger)
+        
         evidence_block = build_evidence_block(result["evidence"])
 
         evidence_build_start = time.time()
+        
+        # Structure: Evidence first (so LLM knows what it has), then rules, then reinforcement
+        # This ordering helps the LLM ground its responses in the available evidence
         system = (
-            cfg.prompting.system_preamble.strip()
+            evidence_block
+            + "\n\n"
+            + cfg.prompting.system_preamble.strip()
             + "\n\n"
             + cfg.prompting.citation_rule.strip()
             + "\n\n"
-            + evidence_block
+            + "REMINDER: Only use commands and configurations shown in the EVIDENCE above. If it's not in the evidence, say you don't have that information."
         )
         msgs = [{"role": "system", "content": system}]
         msgs.extend(req.messages)
         evidence_build_time = time.time() - evidence_build_start
-        logger.info(f"EVIDENCE_BUILD: {len(evidence_block)} chars in {evidence_build_time:.2f}s | MEM: {int(psutil.Process().memory_info().rss / 1024 / 1024)}MB")
+        logger.info(f"SYSTEM_PROMPT: {len(system)} chars built in {evidence_build_time:.2f}s | MEM: {int(psutil.Process().memory_info().rss / 1024 / 1024)}MB")
 
         upstream_payload: Dict[str, Any] = {
             "model": req.model,
@@ -135,9 +175,25 @@ async def chat_completions(
 
 
 def build_evidence_block(evidence: List[Any]) -> str:
+    """Build the evidence block that gets injected into the system prompt."""
+    if not evidence:
+        return "EVIDENCE:\nNo relevant documentation found for this query."
+    
     parts = ["EVIDENCE:"]
     for ch in evidence:
-        parts.append(f"[{ch.chunk_id}] {ch.title} | {ch.source} | {ch.url_or_path}")
+        # Include vendor/product to help LLM distinguish between SONiC distributions
+        vendor = ch.vendor or "unknown"
+        product = ch.product or "unknown"
+        version = ch.version or ""
+        version_str = f" v{version}" if version else ""
+        
+        parts.append(f"[{ch.chunk_id}]")
+        parts.append(f"Title: {ch.title}")
+        parts.append(f"Vendor/Product: {vendor}/{product}{version_str}")
+        parts.append(f"Source: {ch.source} | {ch.url_or_path}")
+        parts.append("---")
         parts.append(ch.text.strip())
+        parts.append("---")
         parts.append("")
+    
     return "\n".join(parts).strip()
