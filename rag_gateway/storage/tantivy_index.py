@@ -1,10 +1,29 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List
 
 import tantivy
+
+
+# Tantivy query parser special characters that need escaping
+_TANTIVY_SPECIAL_CHARS = re.compile(r'([+\-&|!(){}[\]^"~*?:\\/])')
+
+
+def escape_query(query: str) -> str:
+    r"""
+    Escape special characters for Tantivy query parser.
+    
+    Tantivy uses Lucene-like query syntax where these characters have special meaning:
+    + - && || ! ( ) { } [ ] ^ " ~ * ? : \ /
+    
+    This function escapes them so they're treated as literal text.
+    """
+    if not query:
+        return query
+    return _TANTIVY_SPECIAL_CHARS.sub(r'\\\1', query)
 
 
 @dataclass
@@ -55,7 +74,10 @@ class TantivyBM25:
         self.searcher = self.index.searcher()
 
     def search(self, query: str, top_n: int) -> List[TantivyHit]:
-        q = self.index.parse_query(query, ["text"])
+        # Escape special characters to prevent query syntax errors
+        # when user input contains JSON, code snippets, or special chars
+        escaped_query = escape_query(query)
+        q = self.index.parse_query(escaped_query, ["text"])
         results = self.searcher.search(q, top_n)
         hits: List[TantivyHit] = []
         for score, addr in results.hits:
